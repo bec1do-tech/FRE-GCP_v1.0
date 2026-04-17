@@ -1,0 +1,31 @@
+# ─── Google ADK & AI ──────────────────────────────────────────────────────────
+google-adk[database]==0.3.0
+google-generativeai>=0.8.5
+google-cloud-aiplatform>=1.60.0
+vertexai>=1.60.0
+
+# ─── GCP Services ─────────────────────────────────────────────────────────────
+google-cloud-storage>=2.14.0
+google-cloud-functions>=1.16.0
+
+# ─── PostgreSQL (Cloud SQL) ────────────────────────────────────────────────────
+psycopg2-binary>=2.9.9
+SQLAlchemy>=2.0.0
+cloud-sql-python-connector[pg8000]>=1.7.0
+
+# ─── Elasticsearch (Elastic Cloud) ────────────────────────────────────────────
+elasticsearch>=8.12.0
+
+# ─── Document Extraction ──────────────────────────────────────────────────────
+pypdf>=4.2.0
+python-docx>=1.1.0
+python-pptx>=0.6.23
+openpyxl>=3.1.2
+Pillow>=10.3.0
+
+# ─── Web Framework ────────────────────────────────────────────────────────────
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+
+# ─── Utilities ────────────────────────────────────────────────────────────────
+python-dotenv>=1.1.0
