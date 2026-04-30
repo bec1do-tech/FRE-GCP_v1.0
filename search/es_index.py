@@ -45,6 +45,7 @@ _MAPPING: dict[str, Any] = {
             "chunk_index":{"type": "integer"},
             "text":       {"type": "text", "analyzer": "standard"},
             "indexed_at": {"type": "date"},
+            "vector_id":  {"type": "keyword"},
             "metadata": {
                 "properties": {
                     "author":     {"type": "keyword"},
@@ -56,11 +57,8 @@ _MAPPING: dict[str, Any] = {
             },
         }
     },
-    "settings": {
-        "number_of_shards":   2,
-        "number_of_replicas": 1,
-        "refresh_interval":   "5s",
-    },
+    # Note: number_of_shards / number_of_replicas are omitted — Elastic Cloud
+    # Serverless manages these automatically and rejects explicit values.
 }
 
 
@@ -72,9 +70,14 @@ def _client():
     """Return a connected Elasticsearch client or None."""
     try:
         from elasticsearch import Elasticsearch  # type: ignore[import-untyped]
-        kwargs: dict[str, Any] = {"request_timeout": 5}
+        import os
+        kwargs: dict[str, Any] = {"request_timeout": 15}
         if config.ELASTICSEARCH_API_KEY:
             kwargs["api_key"] = config.ELASTICSEARCH_API_KEY
+        # Use RequestsHttpNode so requests library auto-reads HTTPS_PROXY env var
+        if os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY"):
+            from elastic_transport import RequestsHttpNode
+            kwargs["node_class"] = RequestsHttpNode
         es = Elasticsearch(config.ELASTICSEARCH_URL, **kwargs)
         if es.ping():
             return es
@@ -129,6 +132,7 @@ def index_chunks(chunks: list[dict]) -> bool:
                     "text":       chunk["text"],
                     "indexed_at": now,
                     "metadata":   chunk.get("metadata", {}),
+                    "vector_id":  chunk.get("vector_id", ""),
                 }
             )
         resp = es.bulk(operations=operations)
@@ -218,6 +222,59 @@ def search(
         return []
 
 
+def get_chunks_by_uri(gcs_uri: str, limit: int = 10) -> list[dict]:
+    """
+    Retrieve indexed chunks for a specific GCS URI, ordered by chunk_index.
+    Used as a fallback to enrich Vertex AI hits when the local postgres
+    chunk table is empty (e.g. during local development against Cloud infra).
+    """
+    es = _client()
+    if es is None:
+        return []
+    try:
+        resp = es.search(
+            index=_INDEX,
+            body={
+                "query": {"term": {"gcs_uri": gcs_uri}},
+                "sort":  [{"chunk_index": {"order": "asc"}}],
+                "size":  limit,
+                "_source": ["gcs_uri", "filename", "file_type", "chunk_index", "text"],
+            },
+        )
+        return [hit["_source"] for hit in resp["hits"]["hits"]]
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("get_chunks_by_uri failed for %s: %s", gcs_uri, exc)
+        return []
+
+
+def get_chunk_by_vector_id(vector_id: str) -> dict | None:
+    """
+    Look up a single chunk by its Vertex AI vector_id.
+    Used to enrich Vertex AI hits when gcs_uri is not embedded in the index
+    restriction metadata (e.g. vectors indexed without restriction data).
+    Returns None when not found or ES is unavailable.
+    """
+    if not vector_id:
+        return None
+    es = _client()
+    if es is None:
+        return None
+    try:
+        resp = es.search(
+            index=_INDEX,
+            body={
+                "query": {"term": {"vector_id": vector_id}},
+                "size":  1,
+                "_source": ["gcs_uri", "filename", "file_type", "chunk_index", "text", "vector_id"],
+            },
+        )
+        hits = resp["hits"]["hits"]
+        return hits[0]["_source"] if hits else None
+    except Exception as exc:
+        logger.debug("get_chunk_by_vector_id failed for %s: %s", vector_id, exc)
+        return None
+
+
 def delete_index() -> bool:
     """Drop the entire index (used for full re-index operations)."""
     es = _client()
@@ -238,8 +295,10 @@ def index_stats() -> dict:
     if es is None:
         return {"available": False, "doc_count": 0}
     try:
-        stats = es.indices.stats(index=_INDEX)
-        doc_count = stats["_all"]["total"]["docs"]["count"]
-        return {"available": True, "doc_count": doc_count}
+        # Use count() — indices.stats() returns 410 on Elastic Cloud Serverless.
+        if es.indices.exists(index=_INDEX):
+            result = es.count(index=_INDEX)
+            return {"available": True, "doc_count": result["count"]}
+        return {"available": True, "doc_count": 0}
     except Exception:
         return {"available": True, "doc_count": 0}

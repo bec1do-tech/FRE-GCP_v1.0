@@ -22,11 +22,36 @@ _gcs_client = None
 
 
 def _client():
+    """
+    Return a GCS client.
+
+    When a corporate HTTPS proxy is detected (HTTPS_PROXY / HTTP_PROXY env vars),
+    the proxy intercepts TLS and re-signs with the corporate CA, which is not in
+    Python's certifi bundle.  We configure an AuthorizedSession with verify=False
+    and pass it as the _http transport so downloads work through the proxy.
+    """
     global _gcs_client
     if _gcs_client is None:
         try:
+            import os
             from google.cloud import storage  # type: ignore[import-untyped]
-            _gcs_client = storage.Client()
+
+            if os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY"):
+                # Corporate proxy — SSL cert is re-signed by the proxy CA.
+                # Use an AuthorizedSession with cert verification disabled.
+                import urllib3
+                urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+                import google.auth  # type: ignore[import-untyped]
+                from google.auth.transport.requests import AuthorizedSession  # type: ignore[import-untyped]
+
+                creds, _ = google.auth.default()
+                authed_session = AuthorizedSession(creds)
+                authed_session.verify = False
+                _gcs_client = storage.Client(credentials=creds, _http=authed_session)
+                logger.debug("GCS client initialised with proxy-aware AuthorizedSession (verify=False).")
+            else:
+                _gcs_client = storage.Client()
         except Exception as exc:
             logger.warning("GCS client unavailable: %s", exc)
     return _gcs_client
@@ -118,6 +143,9 @@ def list_blobs(bucket: str, prefix: str = "", extensions: tuple[str, ...] = ()) 
         return
     try:
         for blob in client.list_blobs(bucket, prefix=prefix):
+            filename = blob.name.rsplit("/", 1)[-1]
+            if filename.startswith("~$"):  # Office lock/temp files
+                continue
             if extensions and not blob.name.lower().endswith(extensions):
                 continue
             yield f"gs://{bucket}/{blob.name}"
@@ -141,3 +169,34 @@ SUPPORTED_EXTENSIONS: tuple[str, ...] = (
 def is_supported(gcs_uri: str) -> bool:
     """Return True if the blob's extension is in SUPPORTED_EXTENSIONS."""
     return PurePosixPath(gcs_uri).suffix.lower() in SUPPORTED_EXTENSIONS
+
+
+def upload_bytes(
+    data: bytes,
+    bucket: str,
+    blob_path: str,
+    content_type: str = "application/octet-stream",
+) -> str:
+    """
+    Upload raw bytes to GCS and return the gs:// URI.
+
+    Parameters
+    ----------
+    data         : File content to upload.
+    bucket       : Bucket name (without gs:// prefix).
+    blob_path    : Destination path inside the bucket, e.g. 'reports/file.docx'.
+    content_type : MIME type written to the blob metadata.
+
+    Returns
+    -------
+    The full GCS URI: gs://<bucket>/<blob_path>
+    """
+    client = _client()
+    if client is None:
+        raise RuntimeError("GCS client unavailable")
+    bucket_obj = client.bucket(bucket)
+    blob = bucket_obj.blob(blob_path)
+    blob.upload_from_string(data, content_type=content_type)
+    gcs_uri = f"gs://{bucket}/{blob_path}"
+    logger.info("Uploaded %d bytes to %s", len(data), gcs_uri)
+    return gcs_uri

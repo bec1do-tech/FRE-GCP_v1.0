@@ -1,0 +1,6 @@
+C:\Users\BEC1DO\Desktop\canbek\FRE_GCP_v1.0\.venv\Lib\site-packages\authlib\_joserfc_helpers.py:8: AuthlibDeprecationWarning: authlib.jose module is deprecated, please use joserfc instead.
+It will be compatible before version 2.0.0.
+  from authlib.jose import ECKey
+C:\Users\BEC1DO\Desktop\canbek\FRE_GCP_v1.0\.venv\Lib\site-packages\google\cloud\aiplatform\models.py:52: FutureWarning: Support for google-cloud-storage < 3.0.0 will be removed in a future version of google-cloud-aiplatform. Please upgrade to google-cloud-storage >= 3.0.0.
+  from google.cloud.aiplatform.utils import gcs_utils
+IMPORT OK

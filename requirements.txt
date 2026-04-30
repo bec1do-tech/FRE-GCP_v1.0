@@ -1,12 +1,12 @@
 # ─── Google ADK & AI ──────────────────────────────────────────────────────────
 google-adk[database]==0.3.0
 google-generativeai>=0.8.5
-google-cloud-aiplatform>=1.60.0
-vertexai>=1.60.0
+google-cloud-aiplatform>=1.87.0
 
 # ─── GCP Services ─────────────────────────────────────────────────────────────
 google-cloud-storage>=2.14.0
 google-cloud-functions>=1.16.0
+google-cloud-discoveryengine>=0.13.0
 
 # ─── PostgreSQL (Cloud SQL) ────────────────────────────────────────────────────
 psycopg2-binary>=2.9.9
@@ -29,3 +29,5 @@ uvicorn[standard]>=0.29.0
 
 # ─── Utilities ────────────────────────────────────────────────────────────────
 python-dotenv>=1.1.0
+matplotlib>=3.9.0
+PyMuPDF>=1.24.0

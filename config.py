@@ -19,6 +19,9 @@ load_dotenv(Path(__file__).parent / ".env")
 GCP_PROJECT: str = os.environ.get("GCP_PROJECT", "")
 GCP_REGION: str = os.environ.get("GCP_REGION", "us-central1")
 GOOGLE_API_KEY: str = os.environ.get("GOOGLE_API_KEY", "")
+# Path to a service-account JSON key (local dev / CI).  On Cloud Run / GKE
+# leave unset — the workload identity / attached SA is used automatically.
+GOOGLE_APPLICATION_CREDENTIALS: str = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "")
 
 # ── Cloud Storage ─────────────────────────────────────────────────────────────
 GCS_BUCKET: str = os.environ.get("GCS_BUCKET", "")
@@ -52,6 +55,13 @@ VERTEX_AI_DEPLOYED_INDEX_ID: str = os.environ.get(
 )
 VERTEX_AI_INDEX_NAME: str = os.environ.get("VERTEX_AI_INDEX_NAME", "")
 
+# ── Vertex AI Search / Gemini Enterprise ─────────────────────────────────────
+VAIS_DATA_STORE_ID: str = os.environ.get("VAIS_DATA_STORE_ID", "")
+# Gemini Enterprise engine ID — when set, queries route through the engine
+# serving config which enables answer generation on top of the data store.
+VAIS_ENGINE_ID: str = os.environ.get("VAIS_ENGINE_ID", "")
+VAIS_LOCATION: str = os.environ.get("VAIS_LOCATION", "global")
+
 # ── Gemini / Vertex AI Models ──────────────────────────────────────────────────
 GEMINI_MODEL: str = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
 GEMINI_VISION_MODEL: str = os.environ.get("GEMINI_VISION_MODEL", "gemini-2.0-flash")
@@ -62,6 +72,8 @@ VERTEX_EMBEDDING_DIM: int = int(os.environ.get("VERTEX_EMBEDDING_DIM", "768"))
 
 # ── Ingestion Tuning ──────────────────────────────────────────────────────────
 MAX_FILE_MB: int = int(os.environ.get("MAX_FILE_MB", "50"))
+OCR_MAX_PDF_MB: int = int(os.environ.get("OCR_MAX_PDF_MB", "18"))   # Gemini inline PDF limit ~20 MB
+OCR_TIMEOUT_S: int = int(os.environ.get("OCR_TIMEOUT_S", "120"))    # max seconds for OCR call
 CHUNK_SIZE: int = int(os.environ.get("CHUNK_SIZE", "500"))    # approx words
 CHUNK_OVERLAP: int = int(os.environ.get("CHUNK_OVERLAP", "50"))
 BATCH_SIZE: int = int(os.environ.get("BATCH_SIZE", "32"))

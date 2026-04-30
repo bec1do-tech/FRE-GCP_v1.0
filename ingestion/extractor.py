@@ -44,33 +44,94 @@ class ExtractionResult(NamedTuple):
 # Gemini Vision helper
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _genai_client():
+    """Return a google.genai Client pointed at Vertex AI, reused per process."""
+    from google import genai  # type: ignore[import-untyped]
+
+    return genai.Client(
+        vertexai=True,
+        project=config.GCP_PROJECT,
+        location=config.GCP_REGION,
+    )
+
+
 def _describe_image(image_bytes: bytes, mime_type: str = "image/png") -> str:
     """
-    Send one image to Gemini Vision and return a textual description.
+    Send one image to Gemini Vision (via Vertex AI) and return a description.
     Returns "" if Gemini is unavailable or the image is too small.
     """
     if len(image_bytes) < 1024:   # skip trivially small images (bullets, icons)
         return ""
     try:
-        import google.generativeai as genai  # type: ignore[import-untyped]
+        from google.genai import types  # type: ignore[import-untyped]
 
-        if config.GOOGLE_API_KEY:
-            genai.configure(api_key=config.GOOGLE_API_KEY)
-
-        model = genai.GenerativeModel(config.GEMINI_VISION_MODEL)
-        response = model.generate_content(
-            [
+        client = _genai_client()
+        response = client.models.generate_content(
+            model=config.GEMINI_VISION_MODEL,
+            contents=[
                 "Describe the content of this image in detail. "
                 "If it is a chart or graph, summarise the key data points and trends. "
                 "If it is a table, transcribe the data. "
                 "If it is a diagram, describe its structure and labels. "
                 "Be concise but complete.",
-                {"mime_type": mime_type, "data": image_bytes},
-            ]
+                types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
+            ],
         )
-        return response.text.strip()
+        return (response.text or "").strip()
     except Exception as exc:
         logger.debug("Gemini Vision unavailable: %s", exc)
+        return ""
+
+
+def _ocr_pdf_with_gemini(data: bytes) -> str:
+    """
+    OCR fallback for scanned/image-only PDFs.
+    Sends the entire PDF bytes to Gemini via Vertex AI in a single call and
+    asks it to transcribe all visible text.
+    Returns "" on failure, timeout, or empty response.
+    Skips files > OCR_MAX_PDF_MB to avoid inline-data limits.
+    """
+    import concurrent.futures
+
+    ocr_limit_mb = getattr(config, "OCR_MAX_PDF_MB", 18)  # Gemini inline limit ~20 MB
+    ocr_timeout_s = getattr(config, "OCR_TIMEOUT_S", 120)  # max seconds to wait
+    size_mb = len(data) / (1024 * 1024)
+    if size_mb > ocr_limit_mb:
+        logger.warning(
+            "PDF too large for Gemini OCR (%.1f MB > %d MB limit) — skipping OCR.",
+            size_mb, ocr_limit_mb,
+        )
+        return ""
+
+    def _call() -> str:
+        from google.genai import types  # type: ignore[import-untyped]
+
+        client = _genai_client()
+        response = client.models.generate_content(
+            model=config.GEMINI_VISION_MODEL,
+            contents=[
+                "This PDF is a scanned document with no embedded text layer. "
+                "Transcribe ALL visible text exactly as it appears, page by page. "
+                "Begin each page with a [Page N] marker. "
+                "For tables, transcribe the content row by row. "
+                "For pages with no readable text write [No text on page N]. "
+                "Output only the transcribed text — no commentary.",
+                types.Part.from_bytes(data=data, mime_type="application/pdf"),
+            ],
+        )
+        return (response.text or "").strip()
+
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(_call)
+            text = future.result(timeout=ocr_timeout_s)
+        logger.info("Gemini OCR produced %d characters from PDF.", len(text))
+        return text
+    except concurrent.futures.TimeoutError:
+        logger.warning("Gemini PDF OCR timed out after %ds.", ocr_timeout_s)
+        return ""
+    except Exception as exc:
+        logger.warning("Gemini PDF OCR failed: %s", exc)
         return ""
 
 
@@ -134,6 +195,14 @@ def _extract_pdf(data: bytes) -> ExtractionResult:
     full_text = "\n\n".join(text_parts)
     if image_descriptions:
         full_text += "\n\n--- Visual Content ---\n" + "\n".join(image_descriptions)
+
+    # OCR fallback: if pypdf found no text, the PDF is likely a scanned image.
+    if not full_text.strip():
+        logger.info("No text layer detected — attempting Gemini OCR fallback.")
+        ocr_text = _ocr_pdf_with_gemini(data)
+        if ocr_text:
+            full_text = ocr_text
+            metadata["ocr"] = True
 
     return ExtractionResult(full_text, metadata, len(image_descriptions))
 

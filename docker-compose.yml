@@ -16,9 +16,9 @@ services:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_DB:       cognitive_search
+      POSTGRES_DB:       fre_cognitive_search
       POSTGRES_USER:     postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD: FRE_Bosch_3169!
     ports:
       - "5432:5432"
     volumes:

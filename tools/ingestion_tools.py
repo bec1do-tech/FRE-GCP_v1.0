@@ -5,8 +5,6 @@ Tools that let the agent trigger and monitor the document ingestion pipeline.
 These are exposed to the ingestion_manager_agent through its `tools` parameter.
 """
 
-from __future__ import annotations
-
 import logging
 
 logger = logging.getLogger(__name__)
@@ -16,7 +14,7 @@ logger = logging.getLogger(__name__)
 # Trigger ingestion for a single document
 # ─────────────────────────────────────────────────────────────────────────────
 
-def trigger_document_ingestion(gcs_uri: str, force: bool = False) -> dict:
+def trigger_document_ingestion(gcs_uri: str, force: bool = False):
     """
     Trigger the ingestion pipeline for a single document stored in GCS.
     The pipeline will: download the file, extract text and images (via Gemini
@@ -74,7 +72,7 @@ def trigger_folder_ingestion(
     prefix: str = "",
     force: bool = False,
     max_workers: int = 4,
-) -> dict:
+):
     """
     Trigger the ingestion pipeline for all supported documents under a GCS
     bucket prefix.  Processing is parallelised across up to max_workers threads.
@@ -140,7 +138,7 @@ def trigger_folder_ingestion(
 # Ingestion / indexing status
 # ─────────────────────────────────────────────────────────────────────────────
 
-def get_ingestion_status() -> dict:
+def get_ingestion_status():
     """
     Return a summary of the current document indexing status from the database.
 

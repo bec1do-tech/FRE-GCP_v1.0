@@ -162,6 +162,7 @@ def process_document(gcs_uri: str, force: bool = False) -> PipelineResult:
             "chunk_index":c.chunk_index,
             "text":       c.text,
             "metadata":   result.metadata,
+            "vector_id":  c.vector_id,
         }
         for c in chunks
     ]

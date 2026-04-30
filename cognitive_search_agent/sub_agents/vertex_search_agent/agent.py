@@ -29,10 +29,18 @@ vertex_search_agent = Agent(
     even when they don't share the exact keywords.
 
     Steps:
-    1. Extract the search query from the conversation.
-    2. Call hybrid_search with top_k=8 to get semantically relevant results.
-       (The hybrid_search tool internally combines Elasticsearch BM25 and
-        Vertex AI vector search via Reciprocal Rank Fusion.)
+    1. Extract the INFORMATION TOPIC from the conversation — what subject matter
+       needs to be found in the documents.
+
+       IMPORTANT: Strip any action words before searching:
+         • 'Draw a chart of force vs load cycles'  → search for 'force displacement load cycles mechanical test'
+         • 'Plot the failure modes'                 → search for 'failure modes root cause analysis'
+         • 'Summarise the endurance test'           → search for 'endurance test results'
+
+       Use only the domain/subject terms — never include 'draw', 'plot', 'chart',
+       'summarise', 'show me', 'visualise' etc. in the search query.
+
+    2. Call hybrid_search with top_k=8 using the extracted topic query.
     3. Focus on results that come from the "vertex_ai" source.
     4. Format the results as:
 

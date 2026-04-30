@@ -36,6 +36,7 @@ Degradation
 from __future__ import annotations
 
 import logging
+import time
 import uuid
 from typing import Any
 
@@ -194,11 +195,15 @@ def search(query: str, top_k: int = 10, gcs_uri_filter: str = "") -> list[dict]:
     """
     endpoint = _get_index_endpoint()
     if endpoint is None:
+        logger.debug("Vertex AI search skipped: no index endpoint configured.")
         return []
 
+    _t0 = time.perf_counter()
     query_vector = get_query_embedding(query)
     if not query_vector:
+        logger.warning("Vertex AI search skipped: embedding failed for query %r.", query[:80])
         return []
+    logger.info("[TIMING] Vertex embedding: %.2fs", time.perf_counter() - _t0)
 
     try:
         kwargs: dict[str, Any] = {
@@ -211,16 +216,44 @@ def search(query: str, top_k: int = 10, gcs_uri_filter: str = "") -> list[dict]:
                 {"namespace": "gcs_uri", "allow_tokens": [gcs_uri_filter]}
             ]
 
-        response = endpoint.find_neighbors(**kwargs)
-        results  = []
-        for neighbor in response[0]:  # response is [[neighbors]] for one query
-            results.append(
+        # Try to request full datapoints so we can recover gcs_uri from restricts.
+        # Some SDK versions don't support this kwarg — fall back to id-only if it fails.
+        try:
+            response = endpoint.find_neighbors(**{**kwargs, "return_full_datapoint": True})
+            results = []
+            for neighbor in response[0]:
+                gcs_uri = ""
+                dp = getattr(neighbor, "datapoint", None)
+                if dp:
+                    for r in getattr(dp, "restricts", []):
+                        if getattr(r, "namespace", "") == "gcs_uri":
+                            allow = getattr(r, "allow_list", [])
+                            if allow:
+                                gcs_uri = allow[0]
+                                break
+                results.append(
+                    {
+                        "vector_id": neighbor.id,
+                        "gcs_uri":   gcs_uri,
+                        "distance":  neighbor.distance,
+                        "source":    "vertex_ai",
+                    }
+                )
+        except Exception as rdp_exc:
+            # return_full_datapoint not supported or failed — fall back to plain call
+            logger.debug("return_full_datapoint failed (%s), falling back to id-only.", rdp_exc)
+            response = endpoint.find_neighbors(**kwargs)
+            results = [
                 {
                     "vector_id": neighbor.id,
+                    "gcs_uri":   "",
                     "distance":  neighbor.distance,
                     "source":    "vertex_ai",
                 }
-            )
+                for neighbor in response[0]
+            ]
+        logger.info("[TIMING] Vertex AI search returned %d results for query %r (%.2fs total).",
+                    len(results), query[:80], time.perf_counter() - _t0)
         return results
     except Exception as exc:
         logger.error("Vertex AI search failed: %s", exc)

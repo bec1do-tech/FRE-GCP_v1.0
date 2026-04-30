@@ -41,9 +41,12 @@ ingestion_manager_agent = Agent(
     ─────────────────
     • If the user provides a full GCS URI (gs://bucket/path/file.ext)
       → use trigger_document_ingestion
+      → set force=True if the user says "re-index", "force", "retry", or the
+        document previously failed — this bypasses the duplicate-content check
 
     • If the user provides a bucket name and/or folder path
       → use trigger_folder_ingestion
+      → set force=True if the user says "re-index all" or "force re-index"
 
     • If the user asks about status, progress, or counts
       → use get_ingestion_status
@@ -58,7 +61,14 @@ ingestion_manager_agent = Agent(
       identical files uploaded twice are only indexed once.
     • The pipeline uses Gemini Vision to describe charts, diagrams, and images
       found inside PDFs, PPTX, and DOCX files.
+    • Scanned / image-only PDFs (no embedded text layer) are automatically
+      processed via Gemini OCR — the entire PDF is sent to Gemini which
+      transcribes all visible text page by page.  Previously-failed scanned PDFs
+      should be re-indexed with force=True to trigger OCR.
     • Supported file types: PDF, DOCX, PPTX, XLSX, TXT, MD, CSV.
+    • .doc files must be converted to .docx before they can be indexed.
+      To convert legacy .doc files, use Google Cloud Shell:
+      gsutil cp gs://BUCKET/path/file.doc . && libreoffice --headless --convert-to docx file.doc && gsutil cp file.docx gs://BUCKET/path/
 
     Always confirm what action you are about to take before calling a tool
     if the user's intent is ambiguous.

@@ -109,7 +109,7 @@ def _get_connection() -> psycopg2.extensions.connection:
         except Exception as exc:
             logger.warning("Cloud SQL Connector failed (%s), falling back to DSN.", exc)
 
-    return psycopg2.connect(config.POSTGRES_DSN)
+    return psycopg2.connect(config.POSTGRES_DSN, connect_timeout=1)
 
 
 @contextmanager

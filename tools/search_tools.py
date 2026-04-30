@@ -14,8 +14,6 @@ Design principles
 • Citation links back to GCS URIs are always included in results.
 """
 
-from __future__ import annotations
-
 import json
 import logging
 
@@ -34,7 +32,7 @@ def hybrid_search(
     case_id: str = "",
     date_from: str = "",
     date_to: str = "",
-) -> dict:
+):
     """
     Search the document repository using a combination of keyword (BM25) and
     semantic (vector) search, fused by Reciprocal Rank Fusion.
@@ -101,7 +99,7 @@ def hybrid_search(
 # Document retrieval tool
 # ─────────────────────────────────────────────────────────────────────────────
 
-def get_document_chunks(gcs_uri: str, max_chunks: int = 10) -> dict:
+def get_document_chunks(gcs_uri: str, max_chunks: int = 10):
     """
     Retrieve the stored text chunks for a specific document by its GCS URI.
 
@@ -144,32 +142,45 @@ def get_document_chunks(gcs_uri: str, max_chunks: int = 10) -> dict:
                 )
                 rows = cur.fetchall()
 
-        if not rows:
+        if rows:
             return {
-                "gcs_uri": gcs_uri,
-                "filename": "",
-                "chunks": [],
-                "total": 0,
-                "error": "Document not found in index.",
+                "gcs_uri":  gcs_uri,
+                "filename": rows[0]["filename"],
+                "chunks":   [{"chunk_index": r["chunk_index"], "text": r["chunk_text"]} for r in rows],
+                "total":    rows[0]["total"],
             }
 
-        return {
-            "gcs_uri":  gcs_uri,
-            "filename": rows[0]["filename"],
-            "chunks":   [{"chunk_index": r["chunk_index"], "text": r["chunk_text"]} for r in rows],
-            "total":    rows[0]["total"],
-        }
-
     except Exception as exc:
-        logger.error("get_document_chunks tool error: %s", exc)
-        return {"gcs_uri": gcs_uri, "filename": "", "chunks": [], "total": 0, "error": str(exc)}
+        logger.debug("get_document_chunks postgres unavailable: %s — falling back to ES.", exc)
+
+    # Fallback: retrieve chunks directly from Elasticsearch
+    try:
+        from search.es_index import get_chunks_by_uri
+        es_rows = get_chunks_by_uri(gcs_uri, limit=max(1, min(max_chunks, 50)))
+        if es_rows:
+            return {
+                "gcs_uri":  gcs_uri,
+                "filename": es_rows[0].get("filename", ""),
+                "chunks":   [{"chunk_index": r.get("chunk_index", i), "text": r.get("text", "")} for i, r in enumerate(es_rows)],
+                "total":    len(es_rows),
+            }
+    except Exception as exc:
+        logger.error("get_document_chunks ES fallback error: %s", exc)
+
+    return {
+        "gcs_uri": gcs_uri,
+        "filename": "",
+        "chunks": [],
+        "total": 0,
+        "error": "Document not found in index.",
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Search backend status tool
 # ─────────────────────────────────────────────────────────────────────────────
 
-def get_search_status() -> dict:
+def get_search_status():
     """
     Return the current health and statistics of the search backends.
 
@@ -183,18 +194,17 @@ def get_search_status() -> dict:
       vertex_ai     (dict): {available, endpoint_set}
       database      (dict): {indexed, processing, failed, pending}
     """
+    from search.hybrid import status as _status
+
+    backends = _status()
+    result = {
+        "elasticsearch": backends.get("elasticsearch", {}),
+        "vertex_ai":     backends.get("vertex_ai", {}),
+        "database":      {"available": False, "note": "unreachable from local machine"},
+    }
     try:
-        from search.hybrid import status as _status
         from storage.postgres import get_document_stats
-
-        backends = _status()
-        db_stats = get_document_stats()
-
-        return {
-            "elasticsearch": backends.get("elasticsearch", {}),
-            "vertex_ai":     backends.get("vertex_ai", {}),
-            "database":      db_stats,
-        }
+        result["database"] = get_document_stats()
     except Exception as exc:
-        logger.error("get_search_status tool error: %s", exc)
-        return {"error": str(exc)}
+        logger.warning("get_search_status: DB unavailable: %s", exc)
+    return result

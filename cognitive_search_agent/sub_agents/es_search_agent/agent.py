@@ -29,11 +29,21 @@ es_search_agent = Agent(
     present the raw results clearly.
 
     Steps:
-    1. Extract the search query from the conversation — use the user's exact question
-       or the most recent search request.
+    1. Extract the INFORMATION TOPIC from the conversation — what subject matter
+       needs to be found in the documents.
+
+       IMPORTANT: Strip any action words from the query before searching:
+         • 'Draw a chart of force vs load cycles'  → search for 'force load cycles'
+         • 'Plot the failure modes from the test'  → search for 'failure modes test'
+         • 'Summarise the endurance test results'  → search for 'endurance test results'
+         • 'What is the snap ring fracture cause?'  → search for 'snap ring fracture cause'
+
+       Use only the domain/subject terms — never include 'draw', 'plot', 'chart',
+       'summarise', 'show me', 'visualise' etc. in the search query.
+
     2. Identify any filters from the context: file_type, department, case_id,
        date_from, date_to.
-    3. Call hybrid_search with the query and any applicable filters.
+    3. Call hybrid_search with the extracted topic query and any applicable filters.
     4. Format the results as:
 
        ## Elasticsearch BM25 Results
