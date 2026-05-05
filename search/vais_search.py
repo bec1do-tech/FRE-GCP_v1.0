@@ -50,22 +50,38 @@ def search(query: str, top_k: int = 5) -> list[dict[str, Any]]:
         client = discoveryengine.SearchServiceClient(client_options=client_options)
 
         def _do_search(serving_config: str) -> list[dict[str, Any]]:
-            request = discoveryengine.SearchRequest(
-                serving_config=serving_config,
-                query=query,
-                page_size=top_k,
-                content_search_spec=discoveryengine.SearchRequest.ContentSearchSpec(
+            # Extractive answers/segments require Enterprise Edition.
+            # Standard Edition rejects the field with HTTP 400.
+            # Try with extractive content first; fall back to snippets-only.
+            def _build_request(use_extractive: bool) -> "discoveryengine.SearchRequest":
+                content_spec = discoveryengine.SearchRequest.ContentSearchSpec(
                     snippet_spec=discoveryengine.SearchRequest.ContentSearchSpec.SnippetSpec(
                         return_snippet=True,
                         max_snippet_count=3,
                     ),
-                    extractive_content_spec=discoveryengine.SearchRequest.ContentSearchSpec.ExtractiveContentSpec(
-                        max_extractive_answer_count=1,
-                        max_extractive_segment_count=2,
-                    ),
-                ),
-            )
-            response = client.search(request)
+                )
+                if use_extractive:
+                    content_spec.extractive_content_spec = (
+                        discoveryengine.SearchRequest.ContentSearchSpec.ExtractiveContentSpec(
+                            max_extractive_answer_count=1,
+                            max_extractive_segment_count=2,
+                        )
+                    )
+                return discoveryengine.SearchRequest(
+                    serving_config=serving_config,
+                    query=query,
+                    page_size=top_k,
+                    content_search_spec=content_spec,
+                )
+
+            try:
+                response = client.search(_build_request(use_extractive=True))
+            except Exception as ee:
+                if "extractive" in str(ee).lower() or "enterprise" in str(ee).lower() or "400" in str(ee):
+                    logger.info("VAIS: extractive content not supported (Standard Edition) — retrying without it.")
+                    response = client.search(_build_request(use_extractive=False))
+                else:
+                    raise
             out: list[dict[str, Any]] = []
             for result in response.results:
                 doc = result.document

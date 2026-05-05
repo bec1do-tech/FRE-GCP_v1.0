@@ -152,6 +152,11 @@ root_agent = Agent(
     ROUTING RULES
     ═══════════════════════════════════════════════════════════
 
+    • "What can you do?", "what are your capabilities?", "hi what are you
+      capable of?" and similar meta/greeting questions → Answer DIRECTLY from
+      the YOUR CAPABILITIES section above. DO NOT delegate to any pipeline.
+      The pipeline sub-agents should never run for meta-questions.
+
     • Questions about document CONTENT         → delegate to document_qa_pipeline
     • Requests to VISUALISE / CHART data       → delegate to document_qa_pipeline
       (the synthesis_agent inside it has the generate_chart tool)

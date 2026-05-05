@@ -88,15 +88,66 @@ CREATE INDEX IF NOT EXISTS idx_messages_session ON conversation_messages (sessio
 # Connection
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _make_proxy_session(proxy_url: str):
+    """
+    Build an aiohttp.ClientSession that routes ALL requests through an HTTP
+    CONNECT proxy (e.g. px on localhost:3128).
+
+    aiohttp supports per-request proxy via the `proxy=` kwarg, but the Cloud SQL
+    Connector creates the session and calls `session.get(url)` without a proxy
+    kwarg.  We subclass ClientSession to inject the proxy on every call.
+    """
+    import aiohttp
+
+    class _ProxiedSession(aiohttp.ClientSession):
+        """ClientSession that injects proxy= on every request."""
+
+        def __init__(self, proxy: str, **kwargs):
+            self._fixed_proxy = proxy
+            super().__init__(**kwargs)
+
+        async def _request(self, method, str_or_url, **kwargs):
+            kwargs.setdefault("proxy", self._fixed_proxy)
+            return await super()._request(method, str_or_url, **kwargs)
+
+    return _ProxiedSession(proxy=proxy_url)
+
+
 def _get_connection() -> psycopg2.extensions.connection:
     """
-    Return a psycopg2 connection.
+    Return a psycopg2 (or pg8000) connection.
     Uses Cloud SQL Connector when CLOUD_SQL_INSTANCE is set, otherwise
     falls back to a plain DSN (local dev / docker compose).
+
+    Proxy note: The Cloud SQL Connector uses aiohttp to reach
+    sqladmin.googleapis.com.  On the Bosch corporate network all DNS and
+    HTTPS traffic must go through the px proxy on localhost:3128.  We inject
+    a custom aiohttp.ClientSession that sets proxy= on every request, which
+    routes both DNS resolution and TCP through the HTTP CONNECT proxy.
     """
     if config.CLOUD_SQL_INSTANCE:
         try:
+            import os
+            from google.cloud.sql.connector import client as _sql_client_mod
             from google.cloud.sql.connector import Connector  # type: ignore[import-untyped]
+
+            https_proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")
+
+            if https_proxy:
+                _orig_init = _sql_client_mod.CloudSQLClient.__init__
+                _proxy_url = https_proxy  # capture for closure
+
+                def _patched_init(self, sqladmin_api_endpoint, quota_project,
+                                  credentials, client=None, driver=None,
+                                  user_agent=None):
+                    if client is None:
+                        client = _make_proxy_session(_proxy_url)
+                    _orig_init(self, sqladmin_api_endpoint, quota_project,
+                               credentials, client=client, driver=driver,
+                               user_agent=user_agent)
+
+                _sql_client_mod.CloudSQLClient.__init__ = _patched_init  # type: ignore[method-assign]
+
             connector = Connector()
             conn = connector.connect(
                 config.CLOUD_SQL_INSTANCE,
@@ -109,7 +160,7 @@ def _get_connection() -> psycopg2.extensions.connection:
         except Exception as exc:
             logger.warning("Cloud SQL Connector failed (%s), falling back to DSN.", exc)
 
-    return psycopg2.connect(config.POSTGRES_DSN, connect_timeout=1)
+    return psycopg2.connect(config.POSTGRES_DSN, connect_timeout=5)
 
 
 @contextmanager

@@ -2,15 +2,15 @@
 FRE GCP v1.0 — Chart Generation Tool
 ======================================
 Generates matplotlib charts from structured data extracted from documents.
-The chart is saved to a local static folder and returned as a localhost URL
-so ADK's web UI renders it inline without putting base64 in the Gemini request.
+The chart bytes are uploaded to GCS (session_previews/) and a V4 signed URL
+is returned so the ADK web UI renders it inline without any local HTTP server.
 
 Design
 ------
 • Accepts JSON-encoded series so the LLM can construct it from extracted text.
 • Dark-theme styling to match the ADK dev-UI.
-• Stateless and side-effect-free (writes nothing except to static_previews/).
-• Image served via the background HTTP server started by document_preview_tools.
+• Stateless — no local file writes, no background HTTP server.
+• Signed URLs are generated via IAM Credentials API (px-proxy compatible).
 
 Note: do NOT add 'from __future__ import annotations' here. ADK uses
 runtime type introspection on function signatures; that import turns
@@ -20,14 +20,9 @@ all annotations into lazy strings, which ADK cannot parse.
 import io
 import json
 import logging
-import os
 import uuid
 
 logger = logging.getLogger(__name__)
-
-# Reuse the same static folder + port as the preview tool
-_PREVIEW_DIR = os.path.join(os.path.dirname(__file__), "..", "static_previews")
-_PREVIEW_PORT = 8001
 
 # Shared dark-theme colour palette
 _COLORS = [
@@ -195,22 +190,18 @@ def generate_chart(
         buf.seek(0)
         img_bytes = buf.read()
 
-        # Save to static_previews/ and return a localhost URL so the base64
-        # never enters the Gemini API request body (avoids proxy timeouts).
-        try:
-            from tools.document_preview_tools import _ensure_preview_server
-            _ensure_preview_server()
-        except Exception:
-            pass  # server may already be running
-        os.makedirs(os.path.abspath(_PREVIEW_DIR), exist_ok=True)
+        # Upload to GCS session_previews/ and return a signed URL.
+        import config
+        from storage.gcs import upload_bytes as _upload, generate_signed_url as _sign
+        bucket = config.GCS_BUCKET or "fre-cognitive-search-docs"
         safe_title = title[:40].replace(" ", "_").replace("/", "_").replace("\\", "_")
         fname = f"chart_{safe_title}_{uuid.uuid4().hex[:6]}.jpg"
-        fpath = os.path.join(os.path.abspath(_PREVIEW_DIR), fname)
-        with open(fpath, "wb") as fh:
-            fh.write(img_bytes)
-        logger.info("Chart saved: %s (%d bytes)", fpath, len(img_bytes))
+        blob_path = f"session_previews/{fname}"
+        _upload(img_bytes, bucket, blob_path, "image/jpeg")
+        image_url = _sign(bucket, blob_path)
+        logger.info("Chart uploaded to GCS and signed: %s", blob_path)
 
-        image_markdown = f"![{title}](http://localhost:{_PREVIEW_PORT}/{fname})"
+        image_markdown = f"![{title}]({image_url})"
 
         return {
             "image_markdown": image_markdown,
@@ -490,7 +481,7 @@ def analyze_and_fit_data(
 
     plt.tight_layout()
 
-    # ── Save and return (same pattern as generate_chart) ─────────────────────
+    # ── Upload to GCS and return signed URL (same pattern as generate_chart) ─
     buf = io.BytesIO()
     fig.savefig(buf, format="jpeg", dpi=85, bbox_inches="tight",
                 facecolor=fig.get_facecolor(), quality=75)
@@ -498,20 +489,17 @@ def analyze_and_fit_data(
     buf.seek(0)
     img_bytes = buf.read()
 
-    try:
-        from tools.document_preview_tools import _ensure_preview_server
-        _ensure_preview_server()
-    except Exception:
-        pass
-    os.makedirs(os.path.abspath(_PREVIEW_DIR), exist_ok=True)
+    import config
+    from storage.gcs import upload_bytes as _upload, generate_signed_url as _sign
+    bucket = config.GCS_BUCKET or "fre-cognitive-search-docs"
     safe_title = title[:40].replace(" ", "_").replace("/", "_").replace("\\", "_")
     fname = f"fit_{safe_title}_{uuid.uuid4().hex[:6]}.jpg"
-    fpath = os.path.join(os.path.abspath(_PREVIEW_DIR), fname)
-    with open(fpath, "wb") as fh:
-        fh.write(img_bytes)
-    logger.info("Fit chart saved: %s (%d bytes)", fpath, len(img_bytes))
+    blob_path = f"session_previews/{fname}"
+    _upload(img_bytes, bucket, blob_path, "image/jpeg")
+    image_url = _sign(bucket, blob_path)
+    logger.info("Fit chart uploaded to GCS and signed: %s", blob_path)
 
-    image_markdown = f"![{title}](http://localhost:{_PREVIEW_PORT}/{fname})"
+    image_markdown = f"![{title}]({image_url})"
 
     return {
         "image_markdown": image_markdown,

@@ -87,57 +87,65 @@ def hybrid_search(
 
     # Enrich vector hits with text/metadata.
     # Primary source: PostgreSQL chunks table (populated during ingest).
-    # Fallback: Elasticsearch (available when running local ADK against Cloud
-    #           infra where local postgres has no chunk rows yet).
+    # Fallback: Elasticsearch — uses a single batch query for all vector_ids
+    # instead of per-hit individual queries (avoids 30× TCP round-trips to ES).
     _t3 = time.perf_counter()
     vec_hits: list[dict] = []
-    for hit in vec_hits_raw:
-        # Skip postgres entirely if it was unavailable at init time
-        record = None
-        if _pg_available:
+
+    # -- Postgres path (fast when running on Cloud Run with Cloud SQL) ---------
+    pg_records: dict[str, dict] = {}
+    if _pg_available:
+        for hit in vec_hits_raw:
             try:
                 record = postgres.get_chunk_by_vector_id(hit["vector_id"])
+                if record:
+                    pg_records[hit["vector_id"]] = record
             except Exception as exc:  # noqa: BLE001
-                logger.debug("Postgres lookup skipped for vector_id %s: %s", hit.get("vector_id"), exc)
-                _pg_available = False  # stop trying postgres for remaining hits
+                logger.debug("Postgres lookup skipped: %s", exc)
+                _pg_available = False
+                break
 
-        if record is None:
-            # Postgres unavailable / empty — fall back to ES.
-            # If gcs_uri is known, fetch via URI; otherwise look up by vector_id
-            # (handles the case where Vertex AI index restrictions are unpopulated).
-            c = None
-            if hit.get("gcs_uri"):
-                es_chunks = es_index.get_chunks_by_uri(hit["gcs_uri"], limit=1)
-                if es_chunks:
-                    c = es_chunks[0]
-            if c is None and hit.get("vector_id"):
-                c = es_index.get_chunk_by_vector_id(hit["vector_id"])
-            if c:
-                vec_hits.append(
-                    {
-                        "gcs_uri":     c.get("gcs_uri", hit.get("gcs_uri", "")),
-                        "filename":    c.get("filename", ""),
-                        "file_type":   c.get("file_type", ""),
-                        "chunk_index": c.get("chunk_index", 0),
-                        "text":        c.get("text", ""),
-                        "vector_id":   hit["vector_id"],
-                        "source":      "vertex_ai",
-                    }
-                )
-            continue  # skip the 'if record' block below
+    # -- ES batch fallback for hits not found in postgres ----------------------
+    missing_ids = [
+        h["vector_id"] for h in vec_hits_raw
+        if h.get("vector_id") and h["vector_id"] not in pg_records
+    ]
+    es_by_vid: dict[str, dict] = {}
+    if missing_ids:
+        es_by_vid = es_index.get_chunks_by_vector_ids(missing_ids)
 
+    # -- Collect enriched hits --------------------------------------------------
+    for hit in vec_hits_raw:
+        vid = hit.get("vector_id", "")
+        record = pg_records.get(vid)
         if record:
-            vec_hits.append(
-                {
-                    "gcs_uri":     record["gcs_uri"],
-                    "filename":    record["filename"],
-                    "file_type":   record["file_type"],
-                    "chunk_index": record["chunk_index"],
-                    "text":        record["chunk_text"],
-                    "vector_id":   hit["vector_id"],
-                    "source":      "vertex_ai",
-                }
-            )
+            vec_hits.append({
+                "gcs_uri":     record["gcs_uri"],
+                "filename":    record["filename"],
+                "file_type":   record["file_type"],
+                "chunk_index": record["chunk_index"],
+                "text":        record["chunk_text"],
+                "vector_id":   vid,
+                "source":      "vertex_ai",
+            })
+            continue
+
+        c = es_by_vid.get(vid)
+        if c is None and hit.get("gcs_uri"):
+            # Final fallback: fetch by URI (one extra ES call per distinct URI)
+            es_chunks = es_index.get_chunks_by_uri(hit["gcs_uri"], limit=1)
+            if es_chunks:
+                c = es_chunks[0]
+        if c:
+            vec_hits.append({
+                "gcs_uri":     c.get("gcs_uri", hit.get("gcs_uri", "")),
+                "filename":    c.get("filename", ""),
+                "file_type":   c.get("file_type", ""),
+                "chunk_index": c.get("chunk_index", 0),
+                "text":        c.get("text", ""),
+                "vector_id":   vid,
+                "source":      "vertex_ai",
+            })
 
     # ── Phase 3: Reciprocal Rank Fusion ──────────────────────────────────────
     logger.info("[TIMING] Vector enrichment: %.2fs — %d enriched hits", time.perf_counter() - _t3, len(vec_hits))
@@ -162,7 +170,19 @@ def hybrid_search(
             merged_docs[k] = doc
         sources_map.setdefault(k, set()).add("vertex_ai")
 
-    ranked_keys = sorted(rrf_scores, key=rrf_scores.__getitem__, reverse=True)[:top_k]
+    # Apply per-document cap in the final RRF output so no single document
+    # floods all result slots (e.g. 1198_T1.pdf with many matching chunks).
+    _MAX_CHUNKS_PER_DOC = 2
+    ranked_keys_all = sorted(rrf_scores, key=rrf_scores.__getitem__, reverse=True)
+    per_doc_seen: dict[str, int] = {}
+    ranked_keys: list[str] = []
+    for k in ranked_keys_all:
+        uri = merged_docs[k].get("gcs_uri", "")
+        if per_doc_seen.get(uri, 0) < _MAX_CHUNKS_PER_DOC:
+            per_doc_seen[uri] = per_doc_seen.get(uri, 0) + 1
+            ranked_keys.append(k)
+        if len(ranked_keys) >= top_k:
+            break
 
     results = []
     for k in ranked_keys:

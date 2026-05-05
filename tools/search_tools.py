@@ -16,8 +16,60 @@ Design principles
 
 import json
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 logger = logging.getLogger(__name__)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Internal helper — parallel GCS URL signing
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _batch_sign_uris(gcs_uris: list) -> dict:
+    """
+    Sign a list of GCS URIs in parallel threads.
+    Returns {gcs_uri: https_url} — empty string on failure for a given URI.
+    """
+    from pathlib import PurePosixPath
+    import config as _cfg
+    from storage.gcs import generate_signed_url
+
+    base_url = getattr(_cfg, "DOCUMENT_BASE_URL", "").rstrip("/")
+    if base_url:
+        # Production path: no signing needed, construct URL directly
+        return {
+            u: f"{base_url}/{u[5:].partition('/')[2]}"
+            for u in gcs_uris
+            if u.startswith("gs://")
+        }
+
+    def _sign(gcs_uri):
+        try:
+            without = gcs_uri[5:]
+            bucket, _, obj_path = without.partition("/")
+            url = generate_signed_url(
+                bucket=bucket,
+                blob_path=obj_path,
+                expiration_seconds=3600,
+                signing_sa=_cfg.PREVIEW_SIGNING_SA,
+            )
+            return gcs_uri, url
+        except Exception as exc:
+            logger.debug("URL signing failed for %s: %s", gcs_uri, exc)
+            return gcs_uri, ""
+
+    result = {}
+    if not gcs_uris:
+        return result
+    with ThreadPoolExecutor(max_workers=min(8, len(gcs_uris))) as ex:
+        futures = {ex.submit(_sign, u): u for u in gcs_uris}
+        for f in as_completed(futures, timeout=15):
+            try:
+                gcs_uri, url = f.result()
+                result[gcs_uri] = url
+            except Exception:
+                pass
+    return result
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -26,7 +78,7 @@ logger = logging.getLogger(__name__)
 
 def hybrid_search(
     query: str,
-    top_k: int = 5,
+    top_k: int = 10,
     file_type: str = "",
     department: str = "",
     case_id: str = "",
@@ -87,6 +139,12 @@ def hybrid_search(
                     "rrf_score":hit.get("rrf_score", 0.0),
                 }
             )
+
+        # Resolve HTTP URLs for all unique GCS URIs in parallel
+        unique_uris = list({r["gcs_uri"] for r in results if r.get("gcs_uri")})
+        uri_map = _batch_sign_uris(unique_uris)
+        for r in results:
+            r["http_url"] = uri_map.get(r["gcs_uri"], "")
 
         return {"results": results, "total": len(results), "query": query}
 
@@ -174,6 +232,104 @@ def get_document_chunks(gcs_uri: str, max_chunks: int = 10):
         "total": 0,
         "error": "Document not found in index.",
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Document URL tool
+# ─────────────────────────────────────────────────────────────────────────────
+
+def get_document_url(gcs_uri: str) -> dict:
+    """
+    Return a browser-accessible HTTPS URL for a single GCS document.
+    Prefer get_document_urls() when you need URLs for multiple documents.
+
+    Parameters
+    ----------
+    gcs_uri : GCS URI, e.g. gs://fre-cognitive-search-docs/.../file.pdf
+
+    Returns
+    -------
+    Dict: {url, filename, gcs_uri}  or {error} on failure.
+    """
+    from pathlib import PurePosixPath
+    import config as _cfg
+    try:
+        if not gcs_uri.startswith("gs://"):
+            return {"url": "", "filename": "", "gcs_uri": gcs_uri,
+                    "error": f"Not a valid GCS URI: {gcs_uri!r}"}
+        without_scheme = gcs_uri[5:]
+        bucket, _, obj_path = without_scheme.partition("/")
+        filename = PurePosixPath(obj_path).name
+        base_url = _cfg.DOCUMENT_BASE_URL.rstrip("/")
+        if base_url:
+            url = f"{base_url}/{obj_path}"
+        else:
+            from storage.gcs import generate_signed_url
+            url = generate_signed_url(bucket=bucket, blob_path=obj_path,
+                                      expiration_seconds=3600,
+                                      signing_sa=_cfg.PREVIEW_SIGNING_SA)
+        return {"url": url, "filename": filename, "gcs_uri": gcs_uri}
+    except Exception as exc:
+        logger.error("get_document_url failed for %s: %s", gcs_uri, exc)
+        return {"url": "", "filename": "", "gcs_uri": gcs_uri, "error": str(exc)}
+
+
+def get_document_urls(gcs_uris_json: str) -> dict:
+    """
+    Return browser-accessible HTTPS URLs for ALL source documents at once.
+
+    USE THIS TOOL (not get_document_url) to build the Sources Consulted section.
+    Pass ALL unique gcs_uris from the search results in a single call.
+
+    Parameters
+    ----------
+    gcs_uris_json : JSON array of GCS URIs, e.g.:
+        '["gs://fre-cognitive-search-docs/A.pdf",
+          "gs://fre-cognitive-search-docs/B.pdf"]'
+
+    Returns
+    -------
+    Dict with keys:
+      documents (list): each item has {url, filename, gcs_uri, error (if any)}
+      total     (int) : number of URIs processed
+    """
+    import json
+    from pathlib import PurePosixPath
+    import config as _cfg
+
+    try:
+        uris = json.loads(gcs_uris_json)
+    except Exception as exc:
+        return {"documents": [], "total": 0,
+                "error": f"Invalid JSON: {exc}. Pass a JSON array of gs:// URIs."}
+
+    # For production with a base URL, no signing needed — build all URLs fast
+    base_url = _cfg.DOCUMENT_BASE_URL.rstrip("/")
+    results = []
+
+    for gcs_uri in uris:
+        try:
+            if not gcs_uri.startswith("gs://"):
+                results.append({"url": "", "filename": "", "gcs_uri": gcs_uri,
+                                 "error": "Not a valid GCS URI"})
+                continue
+            without_scheme = gcs_uri[5:]
+            bucket, _, obj_path = without_scheme.partition("/")
+            filename = PurePosixPath(obj_path).name
+            if base_url:
+                url = f"{base_url}/{obj_path}"
+            else:
+                from storage.gcs import generate_signed_url
+                url = generate_signed_url(bucket=bucket, blob_path=obj_path,
+                                          expiration_seconds=3600,
+                                          signing_sa=_cfg.PREVIEW_SIGNING_SA)
+            results.append({"url": url, "filename": filename, "gcs_uri": gcs_uri})
+        except Exception as exc:
+            logger.error("get_document_urls failed for %s: %s", gcs_uri, exc)
+            results.append({"url": "", "filename": PurePosixPath(gcs_uri).name,
+                            "gcs_uri": gcs_uri, "error": str(exc)})
+
+    return {"documents": results, "total": len(results)}
 
 
 # ─────────────────────────────────────────────────────────────────────────────

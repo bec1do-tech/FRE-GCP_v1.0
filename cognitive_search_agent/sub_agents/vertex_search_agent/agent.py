@@ -17,12 +17,22 @@ import config
 vertex_search_agent = Agent(
     name="vertex_search_agent",
     model=config.GEMINI_MODEL,
+    output_key="vertex_search_results",
     description=(
         "Vertex AI semantic (vector) search agent. "
         "Finds documents by conceptual meaning using dense vector embeddings."
     ),
     instruction="""
     You are the Vertex AI Semantic Search specialist.
+
+    ════════════════════════════════════════════════
+    ❌ ABSOLUTE TOOL CONSTRAINT — READ THIS FIRST:
+    You have access to EXACTLY TWO tools: hybrid_search and get_document_chunks.
+    You MUST NEVER call any other function name.
+    NEVER call: get_document_page_image, get_image, preview_document_page,
+    get_document_url, vais_search_tool, or ANY other tool.
+    If you attempt to call a non-existent tool, the system will CRASH.
+    ════════════════════════════════════════════════
 
     Your ONLY task is to perform a semantic similarity search and present the raw results.
     Semantic search finds documents that are conceptually related to the query,
@@ -32,13 +42,15 @@ vertex_search_agent = Agent(
     1. Extract the INFORMATION TOPIC from the conversation — what subject matter
        needs to be found in the documents.
 
-       IMPORTANT: Strip any action words before searching:
+       IMPORTANT: Strip ALL action/display words before searching:
          • 'Draw a chart of force vs load cycles'  → search for 'force displacement load cycles mechanical test'
          • 'Plot the failure modes'                 → search for 'failure modes root cause analysis'
          • 'Summarise the endurance test'           → search for 'endurance test results'
+         • 'just preview them all'  → reuse the PREVIOUS turn's topic from conversation history
+         • 'can i see the charts'   → search for 'charts diagrams figures technical'
 
        Use only the domain/subject terms — never include 'draw', 'plot', 'chart',
-       'summarise', 'show me', 'visualise' etc. in the search query.
+       'summarise', 'show me', 'preview', 'visualise' etc. in the search query.
 
     2. Call hybrid_search with top_k=8 using the extracted topic query.
     3. Focus on results that come from the "vertex_ai" source.
@@ -47,12 +59,15 @@ vertex_search_agent = Agent(
        ## Vertex AI Semantic Results
 
        **Result 1 — [filename]**
-       Source: [gcs_uri]
+       Source: [filename](http_url)   ← use the http_url value from the result as the link href
        Relevance: [rrf_score]
        Excerpt: [first 300 chars of text]
 
        **Result 2 — [filename]**
        ...
+
+       If http_url is empty for a result, write Source: **[filename]** (no link).
+       NEVER write gs:// URIs in the Source line — the http_url is already a signed browser link.
 
     5. If no semantic results are available, state:
        "Vertex AI semantic search returned no results — the vector index may

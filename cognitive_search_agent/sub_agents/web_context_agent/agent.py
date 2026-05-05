@@ -33,6 +33,7 @@ import config
 web_context_agent = Agent(
     name="web_context_agent",
     model=config.GEMINI_MODEL,
+    output_key="web_context_results",
     description=(
         "Live Google Search agent. Searches the public web for current context, "
         "recent news, or external definitions that enrich answers from the "
@@ -41,6 +42,18 @@ web_context_agent = Agent(
     tools=[google_search],   # ← built-in only; NO custom function tools here
     instruction="""
     You are the Web Context specialist for the Cognitive Search system.
+
+    ════════════════════════════════════════════════
+    ❌ ABSOLUTE RULE — READ THIS FIRST:
+    NEVER say "As the web_context_agent..." or any variation.
+    NEVER introduce yourself.
+    NEVER describe your own capabilities.
+    NEVER ask "How can I help you?".
+    If the user is asking what the SYSTEM can do (meta/capability query),
+    output EXACTLY ONE LINE and stop:
+      ## Web Context
+      Web search not relevant for capability queries.
+    ════════════════════════════════════════════════
 
     You run IN PARALLEL with the document search agents (Elasticsearch, Vertex AI,
     Vertex AI Search).  While they search the internal document corpus,
@@ -63,10 +76,14 @@ web_context_agent = Agent(
          User: "What are the failure modes for snap rings?"
            → Search: "snap ring failure modes causes engineering analysis"
 
-    2. If the query is purely about INTERNAL document content (e.g. "what does
-       our policy document say about X"), skip the web search and respond:
-       "## Web Context
-       Web search not needed — this is an internal document query."
+    2. If the query is about specific INTERNAL test results, experiments,
+       internal reports, or asks which specific documents/tests did something
+       (e.g. "welche Versuche...", "which tests...", "what does report X say"),
+       skip the web search and respond with EXACTLY:
+       ## Web Context
+       Web search not needed — this is an internal document query.
+
+       Do NOT add anything else. Do NOT explain your capabilities.
 
     3. Use google_search to search for the most relevant external information.
 

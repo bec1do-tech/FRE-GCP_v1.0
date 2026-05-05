@@ -149,6 +149,7 @@ def search(
     query: str,
     top_k: int = 10,
     filters: dict | None = None,
+    max_per_doc: int = 2,
 ) -> list[dict]:
     """
     BM25 full-text search with optional structured metadata filters.
@@ -156,6 +157,9 @@ def search(
     filters example:
       {"file_type": "pdf", "metadata.department": "Finance",
        "date_from": "2024-01-01", "date_to": "2024-12-31"}
+
+    max_per_doc: maximum chunks returned from any single GCS URI.
+      Set to 0 to disable diversity cap (useful for get_document_chunks).
 
     Returns a list of dicts:
       {gcs_uri, filename, file_type, chunk_index, text, score}
@@ -190,6 +194,10 @@ def search(
                 elif value:
                     filter_clauses.append({"term": {key: value}})
 
+        # Over-fetch to allow per-document diversity filtering below.
+        # We request `top_k * max(max_per_doc * 4, 4)` so that after capping
+        # we still end up with top_k diverse results across many documents.
+        fetch_size = top_k * max(max_per_doc * 4, 4) if max_per_doc > 0 else top_k
         body: dict = {
             "query": {
                 "bool": {
@@ -197,17 +205,23 @@ def search(
                     "filter": filter_clauses,
                 }
             },
-            "size":    top_k,
+            "size":    fetch_size,
             "_source": ["gcs_uri", "filename", "file_type", "chunk_index", "text", "metadata"],
         }
 
         resp = es.search(index=_INDEX, body=body)
         results = []
+        per_doc_count: dict[str, int] = {}
         for hit in resp["hits"]["hits"]:
             src = hit["_source"]
+            uri = src.get("gcs_uri", "")
+            if max_per_doc > 0:
+                if per_doc_count.get(uri, 0) >= max_per_doc:
+                    continue
+                per_doc_count[uri] = per_doc_count.get(uri, 0) + 1
             results.append(
                 {
-                    "gcs_uri":     src.get("gcs_uri", ""),
+                    "gcs_uri":     uri,
                     "filename":    src.get("filename", ""),
                     "file_type":   src.get("file_type", ""),
                     "chunk_index": src.get("chunk_index", 0),
@@ -216,6 +230,8 @@ def search(
                     "source":      "elasticsearch",
                 }
             )
+            if len(results) >= top_k:
+                break
         return results
     except Exception as exc:
         logger.error("ES search failed: %s", exc)
@@ -273,6 +289,36 @@ def get_chunk_by_vector_id(vector_id: str) -> dict | None:
     except Exception as exc:
         logger.debug("get_chunk_by_vector_id failed for %s: %s", vector_id, exc)
         return None
+
+
+def get_chunks_by_vector_ids(vector_ids: list[str]) -> dict[str, dict]:
+    """
+    Batch-fetch chunks for a list of Vertex AI vector_ids in a single ES query.
+    Returns a dict mapping vector_id → chunk source dict.
+    Much faster than calling get_chunk_by_vector_id() in a loop.
+    """
+    if not vector_ids:
+        return {}
+    es = _client()
+    if es is None:
+        return {}
+    try:
+        resp = es.search(
+            index=_INDEX,
+            body={
+                "query": {"terms": {"vector_id": list(vector_ids)}},
+                "size":  len(vector_ids),
+                "_source": ["gcs_uri", "filename", "file_type", "chunk_index", "text", "vector_id"],
+            },
+        )
+        return {
+            hit["_source"]["vector_id"]: hit["_source"]
+            for hit in resp["hits"]["hits"]
+            if "vector_id" in hit["_source"]
+        }
+    except Exception as exc:
+        logger.debug("get_chunks_by_vector_ids failed: %s", exc)
+        return {}
 
 
 def delete_index() -> bool:

@@ -26,6 +26,11 @@ GOOGLE_APPLICATION_CREDENTIALS: str = os.environ.get("GOOGLE_APPLICATION_CREDENT
 # ── Cloud Storage ─────────────────────────────────────────────────────────────
 GCS_BUCKET: str = os.environ.get("GCS_BUCKET", "")
 GCS_PREFIX: str = os.environ.get("GCS_PREFIX", "documents/")
+# Service account email used to sign GCS preview URLs (impersonated via ADC).
+# The calling identity needs roles/iam.serviceAccountTokenCreator on this SA.
+PREVIEW_SIGNING_SA: str = os.environ.get(
+    "PREVIEW_SIGNING_SA", "web-tester-local@rbprj-100622.iam.gserviceaccount.com"
+)
 
 # ── Cloud SQL (PostgreSQL) ────────────────────────────────────────────────────
 POSTGRES_HOST: str = os.environ.get("POSTGRES_HOST", "localhost")
@@ -78,6 +83,18 @@ CHUNK_SIZE: int = int(os.environ.get("CHUNK_SIZE", "500"))    # approx words
 CHUNK_OVERLAP: int = int(os.environ.get("CHUNK_OVERLAP", "50"))
 BATCH_SIZE: int = int(os.environ.get("BATCH_SIZE", "32"))
 
+# ── Document Access ──────────────────────────────────────────────────────────
+# When set, document citations use this as the base HTTP URL instead of
+# generating GCS signed URLs.  Construct as: {DOCUMENT_BASE_URL}/{path}
+# where {path} is everything after 'gs://{bucket}/' in the GCS URI.
+#
+# Local dev  → leave empty (signed URLs are generated automatically)
+# Cloud Run  → set to your frontend route, e.g. https://fre.run.app/documents
+DOCUMENT_BASE_URL: str = os.environ.get("DOCUMENT_BASE_URL", "")
+
 # ── Search Tuning ─────────────────────────────────────────────────────────────
-DEFAULT_TOP_K: int = int(os.environ.get("DEFAULT_TOP_K", "5"))
+# DEFAULT_TOP_K: number of final RRF results returned to the synthesis agent.
+# Increased to 10 so that with per-document diversity caps (max 2 chunks/doc)
+# we can surface content from up to 5 different documents per query.
+DEFAULT_TOP_K: int = int(os.environ.get("DEFAULT_TOP_K", "10"))
 RRF_K: int = int(os.environ.get("RRF_K", "60"))
