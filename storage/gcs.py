@@ -275,7 +275,6 @@ def generate_signed_url(
     """
     import datetime
     import google.auth
-    from google.auth import impersonated_credentials
     from google.auth.transport.requests import Request as _Request
 
     # Resolve signing SA
@@ -291,25 +290,14 @@ def generate_signed_url(
             "or pass signing_sa= explicitly."
         )
 
-    # Build impersonated credentials so we can call blob.generate_signed_url()
-    # without a local service-account key file.  The source ADC token is used
-    # to call iamcredentials.googleapis.com/signBlob on behalf of signing_sa.
+    # Use the caller's ADC token (bec1do@bosch.com) directly.
+    # bec1do has roles/iam.serviceAccountTokenCreator on signing_sa, so the
+    # ADC token is authorised to call iamcredentials/signBlob on behalf of
+    # signing_sa.  We must NOT use an impersonated token here because the SA
+    # does not have signBlob on itself.
     source_creds, _ = google.auth.default()
-    target_creds = impersonated_credentials.Credentials(
-        source_credentials=source_creds,
-        target_principal=signing_sa,
-        target_scopes=["https://www.googleapis.com/auth/cloud-platform"],
-        lifetime=300,  # token only needs to live long enough to call signBlob
-    )
-    # Force a token refresh so the impersonated credentials are ready to sign.
-    # This HTTPS call goes through the px proxy automatically.
-    target_creds.refresh(_Request())
+    source_creds.refresh(_Request())
 
-    # Use service_account_email + access_token form for generate_signed_url.
-    # Passing the full credentials object causes SignatureDoesNotMatch because
-    # the library builds the canonical request differently than expected.
-    # The access_token form tells the library to call signBlob via the
-    # IAM Credentials API using the already-refreshed impersonated token.
     client = _client()
     if client is None:
         raise RuntimeError("GCS client not initialised — check Application Default Credentials.")
@@ -319,7 +307,7 @@ def generate_signed_url(
         expiration=datetime.timedelta(seconds=expiration_seconds),
         method="GET",
         service_account_email=signing_sa,
-        access_token=target_creds.token,
+        access_token=source_creds.token,
     )
 
     logger.info("Signed URL generated for gs://%s/%s (expires %ds)", bucket, blob_path, expiration_seconds)
