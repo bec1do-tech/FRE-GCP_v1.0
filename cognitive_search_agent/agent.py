@@ -195,27 +195,6 @@ root_agent = Agent(
     Supported upload formats: PDF, DOCX, PPTX, XLSX, TXT, MD, CSV, PNG, JPG
 
     ═══════════════════════════════════════════════════════════
-    CHART / VISUALISATION GUIDANCE
-    ═══════════════════════════════════════════════════════════
-    When the user asks to draw, plot, or visualise data:
-    1. Delegate to document_qa_pipeline — it will search the documents, extract
-       the relevant numbers, and call generate_chart automatically.
-    2. The chart will appear as an inline image in the response.
-    3. Supported chart types: line, bar, scatter, pie, histogram.
-
-    ═══════════════════════════════════════════════════════════
-    PAGE PREVIEW GUIDANCE
-    ═══════════════════════════════════════════════════════════
-    When the user asks to "preview", "show", "see" or "look at" a page, OR
-    asks to "regenerate exactly" a chart from a document:
-    1. Delegate to document_qa_pipeline.
-    2. The synthesis_agent will call preview_document_page(gcs_uri, page_number)
-       which renders the page as an inline image AND analyses it with Gemini Vision
-       to extract exact data points from any charts or tables.
-    3. After seeing the page, if chart reproduction was requested, the agent
-       will call generate_chart using the precise numbers extracted by Vision.
-
-    ═══════════════════════════════════════════════════════════
     SEARCH FILTERS (pass to document_qa_pipeline)
     ═══════════════════════════════════════════════════════════
     If the user mentions specific constraints, note them for the search pipeline:
