@@ -107,6 +107,18 @@ gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
   --role="roles/storage.objectAdmin" \
   --condition=None
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 9. Artifact Registry — Cloud Build SA must be able to push images
+# ─────────────────────────────────────────────────────────────────────────────
+echo "[9/9] Granting Cloud Build SA Artifact Registry write access …"
+CLOUDBUILD_SA="738231548859@cloudbuild.gserviceaccount.com"
+gcloud artifacts repositories add-iam-policy-binding "${IMAGE_REPO:-fre}" \
+  --location="${REGION}" \
+  --project="${PROJECT_ID}" \
+  --member="serviceAccount:${CLOUDBUILD_SA}" \
+  --role="roles/artifactregistry.writer" \
+  2>/dev/null || echo "  WARNING: repo '${IMAGE_REPO:-fre}' not found yet — run deploy_cloudrun.sh step 0 first, then re-run setup_iam.sh"
+
 echo ""
 echo "=== IAM setup complete ==="
 echo ""
