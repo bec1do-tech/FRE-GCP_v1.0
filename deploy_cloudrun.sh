@@ -177,8 +177,7 @@ if [ "${DEPLOY}" = true ]; then
 |VERTEX_EMBEDDING_MODEL=text-embedding-004\
 |VERTEX_EMBEDDING_DIM=768\
 |PREVIEW_SIGNING_SA=${SERVICE_ACCOUNT}\
-|DEFAULT_TOP_K=5\
-|PORT=8080" \
+|DEFAULT_TOP_K=5" \
     \
     --set-secrets="POSTGRES_PASSWORD=fre-postgres-password:latest,ELASTICSEARCH_API_KEY=fre-es-api-key:latest" \
     \
