@@ -61,13 +61,15 @@ vertex_search_agent = Agent(
 
        **Result 1 — [filename]**
        Source: **[filename]**
+       GCS: [gcs_uri from hybrid_search result]
        Relevance: [rrf_score]
        Excerpt: [first 200 chars of text]
 
        **Result 2 — [filename]**
        ...
 
-       IMPORTANT: Do NOT write URLs or http links — write only the filename in bold.
+       IMPORTANT: Do NOT write HTTP signed URLs — write only the filename in bold and the GCS URI.
+       The GCS URI (gs://...) must always be included — it is needed for document previews.
        Omit duplicate filenames: if the same filename appears more than twice, skip extras.
        Output at most 5 results.
 

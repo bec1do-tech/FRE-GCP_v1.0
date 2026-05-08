@@ -44,28 +44,35 @@ synthesis_agent = Agent(
       "can i see", "show me", "i mean all", "all pages", "relevant pages",
       "all relevant", "show relevant"
 
-    THEN check whether the conversation history already contains a message from
-    you listing specific page numbers (e.g. "I found relevant images on pages 4,
-    7, 11..."). If yes:
+    THEN scan the ENTIRE conversation history (all previous messages, including
+    search result messages from earlier turns) for:
+      a) 📷 lines like "*📷 Images found in: **filename** (gs://...) on pages N*"
+      b) "[Image on page N:" patterns in any ES/Vertex excerpts
+      c) GCS: lines like "GCS: gs://..." in ES/Vertex result blocks
 
-    1. Skip reading new search results.
-    2. Find all page-number/document pairs you identified in the PREVIOUS turn (max 6).
-    3. Build a JSON array: [{"gcs_uri": "gs://...", "page_number": N}, ...]
-    4. Call preview_documents_batch(pages_json=<that array as a JSON string>).
+    Build a list of (gcs_uri, page_number) pairs found anywhere in history (max 6).
+
+    If you find ≥ 1 pair:
+    1. Build a JSON array: [{"gcs_uri": "gs://...", "page_number": N}, ...]
+    2. Call preview_documents_batch(pages_json=<that array as a JSON string>).
        ⚠️ ONE call only — do NOT call preview_document_page individually.
-    5. Paste the ENTIRE tool return value VERBATIM into your reply.
-    6. Write 2–3 sentences summarising what is shown.
-    7. Write the Sources Consulted section.
+    3. Paste the ENTIRE tool return value VERBATIM into your reply.
+    4. Write 2–3 sentences summarising what is shown.
+    5. Write the Sources Consulted section.
     DO NOT run the normal synthesis flow.
 
-    If no page numbers were listed in the previous turn, go to STEP 0b.
+    If you find 0 pairs in history, go to STEP 0b.
 
     ──────────────────────────────────────────────────────────────
-    ⚠️ STEP 0b — SCAN CURRENT SEARCH RESULTS FOR IMAGE PAGES
+    ⚠️ STEP 0b — SCAN CONVERSATION HISTORY FOR IMAGE PAGES
     ──────────────────────────────────────────────────────────────
-    Scan ALL excerpts in the current search results (ES + Vertex + VAIS) for
-    text matching the pattern "[Image on page N:" or "[Page N:".
+    Scan ALL messages in the ENTIRE conversation history (not just the current
+    turn's search results) for text matching "[Image on page N:" or "[Page N:".
+    Also scan for "GCS: gs://" lines in ES/Vertex result blocks to find GCS URIs.
+
     Build a list of (document gcs_uri, page_number) pairs (max 6, different docs first).
+    To get the gcs_uri: use the "GCS: gs://..." line from the same result block as
+    the excerpt containing "[Image on page N:".
 
     If you find ≥ 1 image page:
     1. Build a JSON array: [{"gcs_uri": "gs://...", "page_number": N}, ...]
@@ -75,7 +82,7 @@ synthesis_agent = Agent(
     4. Write 2–3 sentences summarising what is shown.
     5. Write the Sources Consulted section.
 
-    If you find 0 image pages, reply:
+    If you find 0 image pages anywhere in history, reply:
       "No page images were found in the search results for this query.
        The relevant content is text-only. To preview a specific document page,
        say: **preview [filename] page [N]**"
@@ -153,11 +160,18 @@ synthesis_agent = Agent(
        "The indexed documents do not contain sufficient information about [topic].
         You may want to check [specific suggestion] or index additional documents."
 
-    7. MULTIMODAL CONTENT: If any excerpt mentions "[Image on page X:]" or
-       "[Visual Content]", reference that visual analysis in your answer AND
-       list which pages contain images at the end of your Key Findings section:
-         *📷 Images found in: **filename.pdf** on pages 4, 7, 11 — say "preview page 4" to view.*
-       This enables the user to follow up with a preview request.
+    7. MULTIMODAL CONTENT (MANDATORY — do NOT skip this):
+       After writing Key Findings, scan ALL excerpts you received for "[Image on page X:]".
+       If ANY excerpt contains such a marker, you MUST output a 📷 line at the end of
+       Key Findings for EVERY document that has image pages:
+
+         *📷 Images found in: **filename.pdf** (gs://fre-cognitive-search-docs/path/filename.pdf) on pages 4, 7 — say "preview page 4" to view.*
+
+       To get the gcs_uri: look for the "GCS: gs://..." line in the same result block
+       as the excerpt containing "[Image on page X:]". Copy it exactly.
+       If no GCS: line is present, omit the parenthetical URI — but still list the pages.
+       This line is CRITICAL — it enables the preview flow in the next turn.
+       ⚠️ Missing this line breaks the follow-up preview feature. Always output it.
 
     8. DO NOT HALLUCINATE: Only state information that is present in the search
        results.  If you are unsure, say you are unsure.
