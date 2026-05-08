@@ -44,13 +44,13 @@ ES_URL="https://my-elasticsearch-project-a8393b.es.us-central1.gcp.elastic.cloud
 ES_INDEX="cognitive_search_docs"
 
 # Vertex AI Vector Search
-VERTEX_INDEX_ENDPOINT=""        # Fill in: projects/.../indexEndpoints/...
-VERTEX_DEPLOYED_INDEX_ID="cognitive_search_index"
-VERTEX_INDEX_NAME=""            # Fill in: projects/.../indexes/...
+VERTEX_INDEX_ENDPOINT="projects/738231548859/locations/us-central1/indexEndpoints/1458579140058808320"
+VERTEX_DEPLOYED_INDEX_ID="fre_cognitive_search_1776786977108"
+VERTEX_INDEX_NAME="projects/738231548859/locations/us-central1/indexes/3549744702972493824"
 
 # Vertex AI Search / VAIS
-VAIS_DATA_STORE_ID=""           # Fill in from Discovery Engine console
-VAIS_ENGINE_ID=""               # Fill in from Discovery Engine console
+VAIS_DATA_STORE_ID="fre-database_1777369569668"
+VAIS_ENGINE_ID="fileresearchengine_1777366613744"
 VAIS_LOCATION="global"
 
 # Service account that Cloud Run will run AS (needs all resource permissions)
@@ -176,6 +176,7 @@ if [ "${DEPLOY}" = true ]; then
 |GEMINI_VISION_MODEL=gemini-2.5-flash\
 |VERTEX_EMBEDDING_MODEL=text-embedding-004\
 |VERTEX_EMBEDDING_DIM=768\
+|PREVIEW_SIGNING_SA=${SERVICE_ACCOUNT}\
 |DEFAULT_TOP_K=5\
 |PORT=8080" \
     \
