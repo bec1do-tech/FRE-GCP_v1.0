@@ -55,7 +55,8 @@ def vais_search_tool(query: str, top_k: int = 5) -> dict:
 
 vais_search_agent = Agent(
     name="vais_search_agent",
-    model=config.GEMINI_MODEL,
+    model=config.GEMINI_ROUTER_MODEL,
+    planner=config.NO_THINKING_PLANNER,
     output_key="vais_search_results",
     description=(
         "Gemini Enterprise search agent (FileResearchEngine app). "
@@ -84,7 +85,7 @@ vais_search_agent = Agent(
        If the user's latest message is a follow-up like 'just preview them all'
        or 'show me' with no new topic, reuse the topic from the PREVIOUS turn.
 
-    2. Call vais_search_tool with top_k=5 using the extracted topic query.
+    2. Call vais_search_tool with top_k=3 using the extracted topic query.
 
     3. Format results as:
 
@@ -93,7 +94,7 @@ vais_search_agent = Agent(
        **Result 1 — [filename]**
        Source: [filename](http_url)   ← use the http_url value from the result as the link href
        Score: [score]
-       Excerpt: [excerpt]
+       Excerpt: [first 200 chars of excerpt]
 
        **Result 2 — [filename]**
        ...

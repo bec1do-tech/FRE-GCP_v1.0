@@ -68,12 +68,29 @@ VAIS_ENGINE_ID: str = os.environ.get("VAIS_ENGINE_ID", "")
 VAIS_LOCATION: str = os.environ.get("VAIS_LOCATION", "global")
 
 # ── Gemini / Vertex AI Models ──────────────────────────────────────────────────
+# GEMINI_SYNTHESIS_MODEL: synthesis_agent — must respond in <60s through Bosch proxy;
+#                         gemini-2.0-flash-001 completes in <10s; 2.5-flash takes 65s+ → proxy drops.
+# GEMINI_ROUTER_MODEL   : all routing/tool-call agents — gemini-2.0-flash-001 is on a
+#                         separate quota pool from 2.5-flash, preventing 429s.
+# GEMINI_MODEL          : legacy key kept for backward compat; not used by any agent directly.
 GEMINI_MODEL: str = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
-GEMINI_VISION_MODEL: str = os.environ.get("GEMINI_VISION_MODEL", "gemini-2.0-flash")
+GEMINI_SYNTHESIS_MODEL: str = os.environ.get("GEMINI_SYNTHESIS_MODEL", "gemini-2.5-flash")
+GEMINI_ROUTER_MODEL: str = os.environ.get("GEMINI_ROUTER_MODEL", "gemini-2.5-flash")
+GEMINI_VISION_MODEL: str = os.environ.get("GEMINI_VISION_MODEL", "gemini-2.5-flash")
 VERTEX_EMBEDDING_MODEL: str = os.environ.get(
     "VERTEX_EMBEDDING_MODEL", "text-embedding-004"
 )
 VERTEX_EMBEDDING_DIM: int = int(os.environ.get("VERTEX_EMBEDDING_DIM", "768"))
+
+# ── Request Config Helpers ────────────────────────────────────────────
+# Disable extended thinking — Bosch px proxy drops idle SSE connections after ~39s;
+# 2.5 Flash Lite with dynamic thinking on large context takes 60-90s → proxy drops.
+# Must be passed via LlmAgent.planner (not generate_content_config) per ADK validation.
+from google.adk.planners import BuiltInPlanner as _BuiltInPlanner
+from google.genai import types as _genai_types
+NO_THINKING_PLANNER = _BuiltInPlanner(
+    thinking_config=_genai_types.ThinkingConfig(thinking_budget=0)
+)
 
 # ── Ingestion Tuning ──────────────────────────────────────────────────────────
 MAX_FILE_MB: int = int(os.environ.get("MAX_FILE_MB", "50"))
@@ -96,5 +113,5 @@ DOCUMENT_BASE_URL: str = os.environ.get("DOCUMENT_BASE_URL", "")
 # DEFAULT_TOP_K: number of final RRF results returned to the synthesis agent.
 # Increased to 10 so that with per-document diversity caps (max 2 chunks/doc)
 # we can surface content from up to 5 different documents per query.
-DEFAULT_TOP_K: int = int(os.environ.get("DEFAULT_TOP_K", "10"))
+DEFAULT_TOP_K: int = int(os.environ.get("DEFAULT_TOP_K", "5"))
 RRF_K: int = int(os.environ.get("RRF_K", "60"))

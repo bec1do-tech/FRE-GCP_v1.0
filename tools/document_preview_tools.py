@@ -137,3 +137,60 @@ def preview_document_page(
     logger.info("[TIMING] preview_document_page total: %.2fs", time.perf_counter() - _t0)
     return "\n".join(_result_parts)
 
+
+def preview_documents_batch(
+    pages_json: str,
+    tool_context: ToolContext = None,
+) -> str:
+    """
+    Render multiple document pages IN PARALLEL and return all preview images
+    in a single call.  Use this instead of calling preview_document_page
+    repeatedly — it is much faster because all GCS downloads and uploads run
+    concurrently.
+
+    Parameters
+    ----------
+    pages_json : JSON array of objects, each with "gcs_uri" and "page_number".
+                 Example: '[{"gcs_uri":"gs://bucket/file.pdf","page_number":4},
+                             {"gcs_uri":"gs://bucket/file.pdf","page_number":7}]'
+                 Maximum 6 entries; extras are silently ignored.
+
+    Returns
+    -------
+    A single string containing all image markdown blocks, separated by blank
+    lines. Paste the ENTIRE return value verbatim into your reply.
+    """
+    import json
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    try:
+        pages = json.loads(pages_json)
+    except Exception as exc:
+        return f"ERROR: pages_json is not valid JSON — {exc}"
+
+    if not isinstance(pages, list) or len(pages) == 0:
+        return "ERROR: pages_json must be a non-empty JSON array."
+
+    pages = pages[:6]  # cap at 6
+
+    _t0 = time.perf_counter()
+
+    def _one(item):
+        gcs_uri = item.get("gcs_uri", "")
+        page_number = int(item.get("page_number", 1))
+        return preview_document_page(gcs_uri, page_number, tool_context)
+
+    results = [None] * len(pages)
+    with ThreadPoolExecutor(max_workers=min(6, len(pages))) as ex:
+        future_to_idx = {ex.submit(_one, p): i for i, p in enumerate(pages)}
+        for fut in as_completed(future_to_idx):
+            idx = future_to_idx[fut]
+            try:
+                results[idx] = fut.result()
+            except Exception as exc:
+                results[idx] = f"ERROR on item {idx}: {exc}"
+
+    logger.info("[TIMING] preview_documents_batch total: %.2fs for %d pages",
+                time.perf_counter() - _t0, len(pages))
+    return "\n\n".join(r for r in results if r)
+

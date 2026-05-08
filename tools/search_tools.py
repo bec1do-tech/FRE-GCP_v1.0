@@ -134,7 +134,7 @@ def hybrid_search(
                     "rank":     rank,
                     "filename": hit.get("filename", ""),
                     "gcs_uri":  hit.get("gcs_uri", ""),
-                    "excerpt":  hit.get("text", "")[:1000],   # truncate for context window
+                    "excerpt":  hit.get("text", "")[:300],   # keep short — LLM output speed through Bosch proxy
                     "sources":  hit.get("sources", []),
                     "rrf_score":hit.get("rrf_score", 0.0),
                 }

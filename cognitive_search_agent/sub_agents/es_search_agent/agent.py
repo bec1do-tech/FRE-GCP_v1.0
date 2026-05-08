@@ -11,13 +11,14 @@ conversation context that the SynthesisAgent reads from.
 
 from google.adk.agents import Agent
 
-from tools.search_tools import hybrid_search, get_document_chunks
+from tools.search_tools import hybrid_search
 
 import config
 
 es_search_agent = Agent(
     name="es_search_agent",
-    model=config.GEMINI_MODEL,
+    model=config.GEMINI_ROUTER_MODEL,
+    planner=config.NO_THINKING_PLANNER,
     output_key="es_search_results",
     description=(
         "Elasticsearch BM25 keyword search agent. "
@@ -57,20 +58,21 @@ es_search_agent = Agent(
 
     2. Identify any filters from the context: file_type, department, case_id,
        date_from, date_to.
-    3. Call hybrid_search with the extracted topic query and any applicable filters.
+    3. Call hybrid_search with top_k=5 and any applicable filters.
     4. Format the results as:
 
        ## Elasticsearch BM25 Results
 
        **Result 1 — [filename]**
-       Source: [filename](http_url)   ← use the http_url value from the result as the link href
-       Excerpt: [first 300 chars of text]
+       Source: **[filename]**
+       Excerpt: [first 200 chars of text]
 
        **Result 2 — [filename]**
        ...
 
-       If http_url is empty for a result, write Source: **[filename]** (no link).
-       NEVER write gs:// URIs in the Source line — the http_url is already a signed browser link.
+       IMPORTANT: Do NOT write URLs or http links — write only the filename in bold.
+       Omit duplicate filenames: if the same filename appears more than twice, skip extras.
+       Output at most 5 results.
 
     5. If no results are found, state: "No Elasticsearch results found for this query."
 

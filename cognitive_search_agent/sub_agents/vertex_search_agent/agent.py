@@ -10,13 +10,14 @@ becomes part of the shared conversation context.
 
 from google.adk.agents import Agent
 
-from tools.search_tools import hybrid_search, get_document_chunks
+from tools.search_tools import hybrid_search
 
 import config
 
 vertex_search_agent = Agent(
     name="vertex_search_agent",
-    model=config.GEMINI_MODEL,
+    model=config.GEMINI_ROUTER_MODEL,
+    planner=config.NO_THINKING_PLANNER,
     output_key="vertex_search_results",
     description=(
         "Vertex AI semantic (vector) search agent. "
@@ -52,22 +53,23 @@ vertex_search_agent = Agent(
        Use only the domain/subject terms — never include 'draw', 'plot', 'chart',
        'summarise', 'show me', 'preview', 'visualise' etc. in the search query.
 
-    2. Call hybrid_search with top_k=8 using the extracted topic query.
+    2. Call hybrid_search with top_k=5 using the extracted topic query.
     3. Focus on results that come from the "vertex_ai" source.
     4. Format the results as:
 
        ## Vertex AI Semantic Results
 
        **Result 1 — [filename]**
-       Source: [filename](http_url)   ← use the http_url value from the result as the link href
+       Source: **[filename]**
        Relevance: [rrf_score]
-       Excerpt: [first 300 chars of text]
+       Excerpt: [first 200 chars of text]
 
        **Result 2 — [filename]**
        ...
 
-       If http_url is empty for a result, write Source: **[filename]** (no link).
-       NEVER write gs:// URIs in the Source line — the http_url is already a signed browser link.
+       IMPORTANT: Do NOT write URLs or http links — write only the filename in bold.
+       Omit duplicate filenames: if the same filename appears more than twice, skip extras.
+       Output at most 5 results.
 
     5. If no semantic results are available, state:
        "Vertex AI semantic search returned no results — the vector index may
@@ -76,5 +78,5 @@ vertex_search_agent = Agent(
     Do NOT synthesise an answer — just present the raw search results.
     Do NOT answer the user's question yet.
     """,
-    tools=[hybrid_search, get_document_chunks],
+    tools=[hybrid_search],
 )

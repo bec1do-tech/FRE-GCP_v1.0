@@ -64,7 +64,6 @@ from google.adk.agents import Agent, ParallelAgent, SequentialAgent
 from cognitive_search_agent.sub_agents.es_search_agent.agent       import es_search_agent
 from cognitive_search_agent.sub_agents.vertex_search_agent.agent    import vertex_search_agent
 from cognitive_search_agent.sub_agents.vais_search_agent.agent      import vais_search_agent
-from cognitive_search_agent.sub_agents.web_context_agent.agent      import web_context_agent
 from cognitive_search_agent.sub_agents.synthesis_agent.agent        import synthesis_agent
 from cognitive_search_agent.sub_agents.code_analysis_agent.agent    import code_analysis_agent
 from cognitive_search_agent.sub_agents.ingestion_agent.agent        import ingestion_manager_agent
@@ -77,11 +76,10 @@ import config
 parallel_search_gatherer = ParallelAgent(
     name="parallel_search_gatherer",
     description=(
-        "Runs Elasticsearch BM25, Vertex AI Vector Search, Vertex AI Search "
-        "(Gemini Enterprise), and live Google Search simultaneously, "
-        "producing four independent result sets."
+        "Runs Elasticsearch BM25, Vertex AI Vector Search, and Vertex AI Search "
+        "(Gemini Enterprise) simultaneously, producing three independent result sets."
     ),
-    sub_agents=[es_search_agent, vertex_search_agent, vais_search_agent, web_context_agent],
+    sub_agents=[es_search_agent, vertex_search_agent, vais_search_agent],
 )
 
 # ── Step 2: Synthesise from all result sets ───────────────────────────────────
@@ -99,7 +97,8 @@ document_qa_pipeline = SequentialAgent(
 # ── Root Master Agent ─────────────────────────────────────────────────────────
 root_agent = Agent(
     name="cognitive_search_agent",
-    model=config.GEMINI_MODEL,
+    model=config.GEMINI_ROUTER_MODEL,
+    planner=config.NO_THINKING_PLANNER,
     description=(
         "Intelligent document assistant that answers questions from a 10 TB "
         "enterprise document repository using hybrid semantic + keyword search."

@@ -16,43 +16,69 @@ from google.adk.agents import Agent
 
 from tools.search_tools import get_document_chunks, get_document_url
 from tools.chart_tools import generate_chart, analyze_and_fit_data
-from tools.document_preview_tools import preview_document_page
+from tools.document_preview_tools import preview_document_page, preview_documents_batch
 from tools.attachment_tools import extract_office_document_text, save_attachment_for_indexing
 
 import config
 
 synthesis_agent = Agent(
     name="synthesis_agent",
-    model=config.GEMINI_MODEL,
+    model=config.GEMINI_SYNTHESIS_MODEL,
+    planner=config.NO_THINKING_PLANNER,
     description=(
         "Answer synthesis agent. Reads search results from Elasticsearch, "
-        "Vertex AI, Vertex AI Search, and web context, then generates a "
+        "Vertex AI, and Vertex AI Search, then generates a "
         "comprehensive, cited answer with optional statistical model fitting."
     ),
-    instruction="""
+   instruction="""
     You are the Answer Synthesis specialist for the Cognitive Search system.
 
     ══════════════════════════════════════════════════════════════
-    ⚠️ STEP 0 — CHECK FOR "PREVIEW ALL" REQUEST BEFORE ANYTHING ELSE
+    ⚠️ STEP 0 — CHECK FOR "PREVIEW" / "SHOW PAGES" REQUEST BEFORE ANYTHING ELSE
     ══════════════════════════════════════════════════════════════
-    If the user's LATEST message is a short follow-up like:
-      "just preview them all", "preview all", "show them all", "yes preview",
-      "preview all of them", "show all", "yes show them"
+    If the user's LATEST message contains ANY of these phrases:
+      "preview", "show page", "see page", "look at page", "show me page",
+      "render page", "display page", "show image", "open page",
+      "preview them", "preview all", "show them all", "yes preview",
+      "preview all of them", "show all", "yes show them",
+      "can i see", "show me", "i mean all", "all pages", "relevant pages",
+      "all relevant", "show relevant"
 
-    AND the conversation history already contains a message from you listing
-    specific page numbers (e.g. "I found charts on pages 8, 9, 10, 11..."),
-    THEN:
+    THEN check whether the conversation history already contains a message from
+    you listing specific page numbers (e.g. "I found relevant images on pages 4,
+    7, 11..."). If yes:
 
-    1. Skip reading the new search results entirely.
-    2. Find all page-number/document pairs you identified in the PREVIOUS turn.
-    3. Call preview_document_page(gcs_uri, page_number) for up to 6 pages,
-       prioritising different documents.
-    4. Paste EACH tool result's "image_markdown" field VERBATIM into your reply,
-       followed by a [📄 Open full PDF] link using the "pdf_url" field.
-    5. After all previews, write 2–3 sentences summarising what is shown.
-    6. THEN write the Sources Consulted section using the signed HTTPS links
-       from the Source lines in the search results (as described in step 5 below).
-    DO NOT run the normal synthesis flow for follow-up "preview all" requests.
+    1. Skip reading new search results.
+    2. Find all page-number/document pairs you identified in the PREVIOUS turn (max 6).
+    3. Build a JSON array: [{"gcs_uri": "gs://...", "page_number": N}, ...]
+    4. Call preview_documents_batch(pages_json=<that array as a JSON string>).
+       ⚠️ ONE call only — do NOT call preview_document_page individually.
+    5. Paste the ENTIRE tool return value VERBATIM into your reply.
+    6. Write 2–3 sentences summarising what is shown.
+    7. Write the Sources Consulted section.
+    DO NOT run the normal synthesis flow.
+
+    If no page numbers were listed in the previous turn, go to STEP 0b.
+
+    ──────────────────────────────────────────────────────────────
+    ⚠️ STEP 0b — SCAN CURRENT SEARCH RESULTS FOR IMAGE PAGES
+    ──────────────────────────────────────────────────────────────
+    Scan ALL excerpts in the current search results (ES + Vertex + VAIS) for
+    text matching the pattern "[Image on page N:" or "[Page N:".
+    Build a list of (document gcs_uri, page_number) pairs (max 6, different docs first).
+
+    If you find ≥ 1 image page:
+    1. Build a JSON array: [{"gcs_uri": "gs://...", "page_number": N}, ...]
+    2. Call preview_documents_batch(pages_json=<that array as a JSON string>).
+       ⚠️ ONE call only — this runs all pages in parallel, much faster.
+    3. Paste the ENTIRE tool return value VERBATIM into your reply.
+    4. Write 2–3 sentences summarising what is shown.
+    5. Write the Sources Consulted section.
+
+    If you find 0 image pages, reply:
+      "No page images were found in the search results for this query.
+       The relevant content is text-only. To preview a specific document page,
+       say: **preview [filename] page [N]**"
 
     ══════════════════════════════════════════════════════════════
 
@@ -60,7 +86,6 @@ synthesis_agent = Agent(
       1. An Elasticsearch BM25 keyword search (results labelled "Elasticsearch BM25 Results")
       2. A Vertex AI Vector Search (results labelled "Vertex AI Semantic Results")
       3. A Vertex AI Search / Gemini Enterprise query (results labelled "Gemini Enterprise Search Results")
-      4. A live Google Search for external context (results labelled "Web Context Results")
 
     Your task is to synthesise a FINAL, high-quality answer for the user, using ALL
     the search results provided in the conversation context above.
@@ -80,10 +105,6 @@ synthesis_agent = Agent(
     4. MERGE SMARTLY: If the same document appears in both ES and semantic results,
        treat it as a single, highly relevant source (do not duplicate the citation).
 
-    4b. WEB CONTEXT: Use "Web Context Results" to enrich your answer with external
-        validation, current standards, or industry benchmarks — but always
-        prioritise internal document sources for claims about your own data.
-
     5. STRUCTURED OUTPUT: Format your answer with clear sections:
        - **Answer**: direct response
        - **Key Findings**: bullet points with citations
@@ -93,26 +114,31 @@ synthesis_agent = Agent(
        Cite documents by FILENAME ONLY in bold: **EB-09_0036_1.0.pdf**
        Do NOT paste gs:// URIs inline — they are not browser-accessible.
 
-       SOURCES CONSULTED SECTION — COPY LINKS FROM SEARCH RESULTS:
-       The search agents have already embedded signed HTTPS URLs in every
-       Source line, formatted as:  Source: [filename.pdf](https://...)
+       SOURCES CONSULTED SECTION:
+       The Gemini Enterprise results (labelled "Gemini Enterprise Search Results")
+       contain signed HTTPS URLs — use those for clickable links.
+       The ES and Vertex results contain only bold filenames (no URLs) — list those
+       as plain bold text if they are not already covered by a VAIS URL.
 
-       To build the Sources Consulted section:
-       1. Scan every "Source: [...](...)" line in the search results above.
-       2. Collect ALL unique URLs and their filenames from those lines.
-       3. Render the Sources Consulted section as:
-
+       Build the Sources Consulted section as follows:
+       1. First pass — collect (filename → URL) from VAIS Source lines:
+          Format A: Source: [filename](https://...)  → extract both
+          Format B: Source: filename(https://...)    → extract both
+       2. Second pass — collect any additional unique filenames from ES/Vertex
+          Source: **filename** lines that are NOT already in the VAIS set.
+       3. Render:
           **Sources Consulted**
-          1. [filename1.pdf](https://signed-url-1)
-          2. [filename2.pdf](https://signed-url-2)
+          1. [filename1.pdf](https://signed-url)   ← if URL available from VAIS
+          2. **filename2.pdf**                      ← if URL not available
+          ...
+       4. End with: *Search returned N results from M unique documents.*
           ...
 
        4. End with: *Search returned N results from M unique documents.*
           N = total number of result entries across all search backends.
           M = number of unique filenames.
 
-       ❌ If a Source line has no valid HTTPS link (http_url was empty), show
-          **filename.pdf** as bold text (no link) for that entry.
+       ❌ If a Source line has no extractable URL, show **filename.pdf** as bold text.
        ❌ NEVER call get_document_urls or get_document_url for Sources Consulted —
           the signed URLs are already present in the Source lines above.
        ❌ NEVER write gs:// URIs as link hrefs.
@@ -128,7 +154,10 @@ synthesis_agent = Agent(
         You may want to check [specific suggestion] or index additional documents."
 
     7. MULTIMODAL CONTENT: If any excerpt mentions "[Image on page X:]" or
-       "[Visual Content]", reference that visual analysis in your answer.
+       "[Visual Content]", reference that visual analysis in your answer AND
+       list which pages contain images at the end of your Key Findings section:
+         *📷 Images found in: **filename.pdf** on pages 4, 7, 11 — say "preview page 4" to view.*
+       This enables the user to follow up with a preview request.
 
     8. DO NOT HALLUCINATE: Only state information that is present in the search
        results.  If you are unsure, say you are unsure.
@@ -177,27 +206,11 @@ synthesis_agent = Agent(
             Example: "Best fit: Cubic (R²=0.9973) — y = 3.2e-14x³ + ..."
                      "Prediction at 75,000 cycles → Force ≈ 10.05 kN"
 
-    10. PAGE PREVIEW — ONLY ON EXPLICIT REQUEST:
-        Call preview_document_page ONLY when the user's current message contains
-        at least one of these trigger phrases:
-          "preview", "show page", "see page", "look at page", "show me page",
-          "render page", "display page", "show image", "open page"
-
-        ❌ DO NOT call preview just because "charts", "graphs", or "diagrams"
-           appear in the query — those belong to the scan-and-report workflow (10b).
-
-        When preview IS explicitly requested:
-        a. Call preview_document_page(gcs_uri, page_number).
-        b. ⚠️ CRITICAL: Copy the ENTIRE value of the "image_markdown" field from the
-           tool response and paste it as-is into your reply. It starts with "!["
-           Example: ![filename.pdf — page 1](http://localhost:8001/filename_p1_abc123.jpg)
-           Do NOT write "[Image on page 1]" or describe the page in text only.
-           PASTE the raw markdown string so the image renders in the UI.
-        c. On the NEXT LINE output a clickable link using the "pdf_url" field:
-           [📄 Open full PDF](http://localhost:8001/filename.pdf)
-           This lets the user open the complete document in the browser.
-        d. Then read the "vision_analysis" field — it contains extracted data points.
-        e. If chart reproduction was requested, call generate_chart using those numbers.
+    10. PAGE PREVIEW — HANDLED BY STEP 0 / STEP 0b ABOVE.
+        Rule 10 applies only when the user requests a SPECIFIC page NOT already
+        covered by Step 0/0b (e.g. "preview EB-09 page 12").
+        Call preview_document_page(gcs_uri, page_number) for the requested page,
+        paste "image_markdown" verbatim, and add a [📄 Open full PDF] link.
 
     10b. FINDING CHARTS IN A DOCUMENT — mandatory workflow when user asks for
          "charts", "graphs", "plots", or "diagrams" from a specific document:
@@ -356,6 +369,7 @@ synthesis_agent = Agent(
         generate_chart,
         analyze_and_fit_data,
         preview_document_page,
+        preview_documents_batch,
         extract_office_document_text,
         save_attachment_for_indexing,
     ],
