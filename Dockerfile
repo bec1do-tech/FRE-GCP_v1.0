@@ -15,9 +15,17 @@ RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 # ── Stage 2: runtime ──────────────────────────────────────────────────────────
 FROM python:3.12-slim
 
-# System libs needed by psycopg2 (libpq) and Pillow
+# System libs:
+#   libpq5          — psycopg2 runtime
+#   libgl1           — PyMuPDF (libGL.so.1) on Debian Bookworm
+#   libglib2.0-0     — PyMuPDF dependency
+#   libgomp1         — OpenMP (used by some MuPDF builds)
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends libpq5 libgl1-mesa-glx \
+    && apt-get install -y --no-install-recommends \
+       libpq5 \
+       libgl1 \
+       libglib2.0-0 \
+       libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

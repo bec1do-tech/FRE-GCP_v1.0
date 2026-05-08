@@ -1,0 +1,41 @@
+# ── Secrets — never bake into image ──────────────────────────────────────────
+.env
+*.json.key
+service-account*.json
+*-credentials.json
+gcp-key*.json
+
+# ── Python runtime artefacts ──────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+
+# ── Test / dev files (not needed in production image) ────────────────────────
+test_*.py
+ingest_bulk.py
+diagnose_import.py
+diag_out.txt
+clean_db*.py
+clean_db_out.txt
+adk_web.log
+ingestion_report.json
+*.log
+
+# ── Local data ────────────────────────────────────────────────────────────────
+static_previews/
+session_previews/
+
+# ── Git and editor ────────────────────────────────────────────────────────────
+.git/
+.gitignore
+.vscode/
+.idea/
+
+# ── Docker itself ─────────────────────────────────────────────────────────────
+docker-compose.yml
