@@ -96,6 +96,17 @@ gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
   --role="roles/discoveryengine.viewer" \
   --condition=None
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 8. Cloud Build (2nd gen uses Compute Engine default SA) — needs GCS access
+#    to upload/download build source from the _cloudbuild bucket
+# ─────────────────────────────────────────────────────────────────────────────
+echo "[8/8] Granting Cloud Build compute SA storage access …"
+COMPUTE_SA="${PROJECT_NUMBER:-$(gcloud projects describe "${PROJECT_ID}" --format='value(projectNumber)')}-compute@developer.gserviceaccount.com"
+gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+  --member="serviceAccount:${COMPUTE_SA}" \
+  --role="roles/storage.objectAdmin" \
+  --condition=None
+
 echo ""
 echo "=== IAM setup complete ==="
 echo ""
