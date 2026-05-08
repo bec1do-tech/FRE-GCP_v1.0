@@ -28,9 +28,12 @@ COPY --from=builder /install /usr/local
 # Copy application source
 COPY . .
 
+# Make entrypoint executable (needed when built on Windows — line endings fixed too)
+RUN sed -i 's/\r//' entrypoint.sh && chmod +x entrypoint.sh
+
 # Cloud Run injects PORT; default to 8080 for local testing
 ENV PORT=8080
 EXPOSE 8080
 
-# ADK web server — serves the agent at /run, /run_sse, /list-apps
-CMD ["adk", "web", "--host", "0.0.0.0", "--port", "8080"]
+# Run startup smoke tests, then launch ADK web server
+ENTRYPOINT ["./entrypoint.sh"]
