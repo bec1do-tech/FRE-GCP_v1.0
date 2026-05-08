@@ -78,8 +78,8 @@ try:
         warn("GCS bucket reachable but 0 documents found",
              f"bucket={config.GCS_BUCKET} prefix={config.GCS_PREFIX}")
 except Exception as exc:
-    # GCS is critical — without it, preview and ingestion both fail
-    fail("GCS bucket unreachable", str(exc), hard=True)
+    # Soft-fail so the container starts even if GCS perms are not yet propagated
+    fail("GCS bucket unreachable", str(exc), hard=False)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
