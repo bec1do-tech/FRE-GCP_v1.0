@@ -24,6 +24,7 @@ TEST_SESSION_ID        Optional fixed session ID (auto-generated if omitted)
 
 import json
 import os
+import subprocess
 import sys
 import time
 import uuid
@@ -40,6 +41,21 @@ USER_ID  = "smoke-test-user"
 
 if not BASE_URL:
     sys.exit("ERROR: Set CLOUD_RUN_URL before running. e.g. https://fre-xxxx-uc.a.run.app")
+
+# Get identity token for authenticated Cloud Run (no-op for localhost)
+def _get_auth_headers() -> dict:
+    if BASE_URL.startswith("http://localhost") or BASE_URL.startswith("http://127"):
+        return {}
+    result = subprocess.run(
+        ["gcloud", "auth", "print-identity-token"],
+        capture_output=True, text=True
+    )
+    token = result.stdout.strip()
+    if not token:
+        sys.exit("ERROR: could not get identity token — run 'gcloud auth login' first")
+    return {"Authorization": f"Bearer {token}"}
+
+AUTH_HEADERS = _get_auth_headers()
 
 PASS = "\033[32m PASS\033[0m"
 FAIL = "\033[31m FAIL\033[0m"
@@ -69,7 +85,7 @@ def post_run(message: str, session_id: str = SESSION) -> dict:
         },
         "streaming": False,
     }
-    resp = requests.post(url, json=payload, timeout=TIMEOUT)
+    resp = requests.post(url, json=payload, headers=AUTH_HEADERS, timeout=TIMEOUT)
     resp.raise_for_status()
     return resp.json()
 
@@ -92,7 +108,7 @@ def extract_text(run_response: dict) -> str:
 print("\n=== TEST 1: /list-apps (service is up) ===")
 t0 = time.perf_counter()
 try:
-    r = requests.get(f"{BASE_URL}/list-apps", timeout=15)
+    r = requests.get(f"{BASE_URL}/list-apps", headers=AUTH_HEADERS, timeout=15)
     elapsed = time.perf_counter() - t0
     ok = r.status_code == 200 and APP_NAME in r.text
     record("list-apps returns 200", r.status_code == 200, f"HTTP {r.status_code}")
