@@ -32,6 +32,14 @@ import config
 
 logger = logging.getLogger(__name__)
 
+
+def _rows_as_dicts(cur) -> list[dict]:
+    """Convert cursor fetchall() rows to dicts — works with psycopg2 and pg8000."""
+    if cur.description is None:
+        return []
+    cols = [d[0] for d in cur.description]
+    return [dict(zip(cols, row)) for row in cur.fetchall()]
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Schema
 # ─────────────────────────────────────────────────────────────────────────────
@@ -264,7 +272,7 @@ def mark_document_failed(doc_id: int) -> None:
 def get_document_stats() -> dict:
     """Return a summary of document counts by status."""
     with _conn() as con:
-        with con.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        with con.cursor() as cur:
             cur.execute(
                 """
                 SELECT status, COUNT(*) AS count
@@ -273,7 +281,7 @@ def get_document_stats() -> dict:
                 ORDER BY status
                 """
             )
-            rows = cur.fetchall()
+            rows = _rows_as_dicts(cur)
     return {row["status"]: row["count"] for row in rows}
 
 
@@ -309,7 +317,7 @@ def upsert_chunks(doc_id: int, chunks: list[dict]) -> None:
 def get_chunk_by_vector_id(vector_id: str) -> dict | None:
     """Retrieve a chunk record by its Vertex AI vector ID (for citation lookup)."""
     with _conn() as con:
-        with con.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        with con.cursor() as cur:
             cur.execute(
                 """
                 SELECT c.id, c.doc_id, c.chunk_index, c.chunk_text,
@@ -321,8 +329,8 @@ def get_chunk_by_vector_id(vector_id: str) -> dict | None:
                 """,
                 (vector_id,),
             )
-            row = cur.fetchone()
-    return dict(row) if row else None
+            rows = _rows_as_dicts(cur)
+    return rows[0] if rows else None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -360,7 +368,7 @@ def get_conversation_history(session_id: str, limit: int = 20) -> list[dict]:
     Each dict has keys: role, content, created_at.
     """
     with _conn() as con:
-        with con.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        with con.cursor() as cur:
             cur.execute(
                 """
                 SELECT role, content, created_at
@@ -371,5 +379,5 @@ def get_conversation_history(session_id: str, limit: int = 20) -> list[dict]:
                 """,
                 (session_id, limit),
             )
-            rows = cur.fetchall()
-    return [dict(r) for r in reversed(rows)]
+            rows = _rows_as_dicts(cur)
+    return list(reversed(rows))
