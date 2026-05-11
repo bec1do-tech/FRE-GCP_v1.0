@@ -72,8 +72,18 @@ def record(name: str, ok: bool, detail: str = ""):
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
+def create_session(session_id: str = SESSION) -> None:
+    """Create an ADK session (required before /run in ADK 0.3.0+)."""
+    url = f"{BASE_URL}/apps/{APP_NAME}/users/{USER_ID}/sessions/{session_id}"
+    resp = requests.post(url, json={}, headers=AUTH_HEADERS, timeout=15)
+    # 200 = created, 409 = already exists — both are fine
+    if resp.status_code not in (200, 201, 409):
+        resp.raise_for_status()
+
+
 def post_run(message: str, session_id: str = SESSION) -> dict:
-    """POST to /run — waits for full JSON reply (non-streaming)."""
+    """Create session then POST to /run — waits for full JSON reply (non-streaming)."""
+    create_session(session_id)
     url = f"{BASE_URL}/run"
     payload = {
         "app_name":  APP_NAME,
