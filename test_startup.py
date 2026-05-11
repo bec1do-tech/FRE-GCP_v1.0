@@ -87,7 +87,7 @@ except Exception as exc:
 # ─────────────────────────────────────────────────────────────────────────────
 print("\n[3/6] Checking Elasticsearch …")
 try:
-    from search.es_index import _es_client, _INDEX
+    from search.es_index import _client as _es_client, _INDEX
     t0 = time.perf_counter()
     es = _es_client()
     elapsed = time.perf_counter() - t0

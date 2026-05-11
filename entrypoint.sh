@@ -18,4 +18,4 @@ echo "============================================="
 echo " Starting ADK web server on port ${PORT:-8080}"
 echo "============================================="
 
-exec adk web --host 0.0.0.0 --port "${PORT:-8080}"
+exec adk web --port "${PORT:-8080}"
