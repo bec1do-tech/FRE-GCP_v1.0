@@ -31,3 +31,4 @@ uvicorn[standard]>=0.29.0
 python-dotenv>=1.1.0
 matplotlib>=3.9.0
 PyMuPDF>=1.24.0
+deprecated>=1.2.14
