@@ -60,9 +60,12 @@ def _describe_image(image_bytes: bytes, mime_type: str = "image/png") -> str:
     Send one image to Gemini Vision (via Vertex AI) and return a description.
     Returns "" if Gemini is unavailable or the image is too small.
     """
+    import concurrent.futures
+
     if len(image_bytes) < 1024:   # skip trivially small images (bullets, icons)
         return ""
-    try:
+
+    def _call() -> str:
         from google.genai import types  # type: ignore[import-untyped]
 
         client = _genai_client()
@@ -78,6 +81,15 @@ def _describe_image(image_bytes: bytes, mime_type: str = "image/png") -> str:
             ],
         )
         return (response.text or "").strip()
+
+    timeout_s = getattr(config, "VISION_TIMEOUT_S", 60)
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(_call)
+            return future.result(timeout=timeout_s)
+    except concurrent.futures.TimeoutError:
+        logger.warning("Gemini Vision timed out after %ds — skipping image.", timeout_s)
+        return ""
     except Exception as exc:
         logger.debug("Gemini Vision unavailable: %s", exc)
         return ""
