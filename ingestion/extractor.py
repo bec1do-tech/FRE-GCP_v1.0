@@ -82,7 +82,7 @@ def _describe_image(image_bytes: bytes, mime_type: str = "image/png") -> str:
         )
         return (response.text or "").strip()
 
-    timeout_s = getattr(config, "VISION_TIMEOUT_S", 60)
+    timeout_s = int(os.environ.get("VISION_TIMEOUT_S", "60"))
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
             future = pool.submit(_call)
@@ -106,7 +106,7 @@ def _ocr_pdf_with_gemini(data: bytes) -> str:
     import concurrent.futures
 
     ocr_limit_mb = getattr(config, "OCR_MAX_PDF_MB", 18)  # Gemini inline limit ~20 MB
-    ocr_timeout_s = getattr(config, "OCR_TIMEOUT_S", 120)  # max seconds to wait
+    ocr_timeout_s = int(os.environ.get("OCR_TIMEOUT_S", "120"))  # max seconds to wait
     size_mb = len(data) / (1024 * 1024)
     if size_mb > ocr_limit_mb:
         logger.warning(
