@@ -76,6 +76,8 @@ parser.add_argument("--report",  default="ingestion_report.json",
                     help="Path to write JSON failure report (default: ingestion_report.json)")
 parser.add_argument("--limit",   type=int, default=0,
                     help="Index only the first N documents (0 = no limit, useful for testing)")
+parser.add_argument("--failed-only", action="store_true",
+                    help="Retry only documents with status=failed in the DB (ignores --prefix scan)")
 args = parser.parse_args()
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -118,32 +120,49 @@ def _eta(elapsed: float, done: int, total: int) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 # Step 1 — List all documents
 # ─────────────────────────────────────────────────────────────────────────────
-print(f"\nScanning gs://{BUCKET}/{PREFIX} …")
-t_scan = time.perf_counter()
-all_uris = list(gcs.list_blobs(BUCKET, prefix=PREFIX, extensions=gcs.SUPPORTED_EXTENSIONS))
-scan_elapsed = time.perf_counter() - t_scan
+if args.failed_only:
+    print("\nQuerying DB for failed documents …")
+    try:
+        import psycopg2
+        con = psycopg2.connect(config.POSTGRES_DSN, connect_timeout=5)
+        cur = con.cursor()
+        cur.execute("SELECT gcs_uri FROM documents WHERE status = 'failed'")
+        all_uris = [row[0] for row in cur.fetchall()]
+        con.close()
+    except Exception as exc:
+        sys.exit(f"ERROR: Could not query failed documents from DB: {exc}")
+    if not all_uris:
+        sys.exit("No failed documents found in DB — nothing to retry.")
+    print(f"Found {len(all_uris)} failed documents to retry.")
+    FORCE = True  # always force re-index for failed docs
+else:
+    print(f"\nScanning gs://{BUCKET}/{PREFIX} …")
+    t_scan = time.perf_counter()
+    all_uris = list(gcs.list_blobs(BUCKET, prefix=PREFIX, extensions=gcs.SUPPORTED_EXTENSIONS))
+    scan_elapsed = time.perf_counter() - t_scan
 
-if not all_uris:
-    sys.exit(f"No supported documents found under gs://{BUCKET}/{PREFIX}")
+    if not all_uris:
+        sys.exit(f"No supported documents found under gs://{BUCKET}/{PREFIX}")
 
-print(f"Found {len(all_uris)} supported documents in {scan_elapsed:.1f}s")
+    print(f"Found {len(all_uris)} supported documents in {scan_elapsed:.1f}s")
 
-# Extension breakdown
-ext_counts: dict[str, int] = {}
-for u in all_uris:
-    ext = PurePosixPath(u).suffix.lower()
-    ext_counts[ext] = ext_counts.get(ext, 0) + 1
-for ext, count in sorted(ext_counts.items(), key=lambda x: -x[1]):
-    print(f"  {ext:8s}  {count:5d} files")
+if not args.failed_only:
+    # Extension breakdown
+    ext_counts: dict[str, int] = {}
+    for u in all_uris:
+        ext = PurePosixPath(u).suffix.lower()
+        ext_counts[ext] = ext_counts.get(ext, 0) + 1
+    for ext, count in sorted(ext_counts.items(), key=lambda x: -x[1]):
+        print(f"  {ext:8s}  {count:5d} files")
 
-if args.limit > 0:
-    all_uris = all_uris[: args.limit]
-    print(f"\n[--limit {args.limit}] Processing first {len(all_uris)} documents only.")
+    if args.limit > 0:
+        all_uris = all_uris[: args.limit]
+        print(f"\n[--limit {args.limit}] Processing first {len(all_uris)} documents only.")
 
-if args.dry_run:
-    print(f"\nDry run complete — {len(all_uris)} documents would be indexed.")
-    print(f"Re-run without --dry-run to start ingestion.")
-    sys.exit(0)
+    if args.dry_run:
+        print(f"\nDry run complete — {len(all_uris)} documents would be indexed.")
+        print(f"Re-run without --dry-run to start ingestion.")
+        sys.exit(0)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Step 2 — Init DB schema
