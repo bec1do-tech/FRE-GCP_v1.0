@@ -1,0 +1,75 @@
+{
+  "protocolVersion": "0.3.0",
+  "name": "cognitive_search_agent",
+  "description": "File Research Engine (FRE) — Cognitive Search Agent. Answers questions from a large enterprise document repository using hybrid semantic + keyword search across PDFs, DOCX, PPTX, and XLSX files. Supports document Q&A with citations, page image previews, chart generation, statistical model fitting, and GCS-based document ingestion.",
+  "version": "1.0.0",
+  "url": "https://fre-cognitive-search-hnmn25tr7a-uc.a.run.app/run",
+  "provider": {
+    "organization": "Bosch — DC-MO/ETA",
+    "url": "https://www.bosch.com"
+  },
+  "capabilities": {
+    "streaming": true,
+    "pushNotifications": false,
+    "stateTransitionHistory": false
+  },
+  "defaultInputModes": ["application/json", "text/plain"],
+  "defaultOutputModes": ["application/json", "text/markdown", "image/png"],
+  "skills": [
+    {
+      "id": "document_qa",
+      "name": "Document Q&A",
+      "description": "Answer questions from the indexed enterprise document corpus using hybrid BM25 + semantic search (Elasticsearch + Vertex AI Vector Search + Vertex AI Search). Returns cited answers with source filenames and signed GCS URLs.",
+      "tags": ["search", "rag", "question-answering", "hybrid-search", "citations", "pdf", "docx"],
+      "examples": [
+        "What does our 2024 supplier audit report say about logistics risks?",
+        "Summarize the cybersecurity section of the latest compliance handbook."
+      ],
+      "inputModes": ["text/plain"],
+      "outputModes": ["application/json", "text/markdown"]
+    },
+    {
+      "id": "document_preview",
+      "name": "Document Page Preview",
+      "description": "Render and display specific pages of indexed PDF documents as inline images. Supports batch parallel preview of multiple pages across multiple documents.",
+      "tags": ["preview", "pdf", "image", "page-render"],
+      "inputModes": ["application/json"],
+      "outputModes": ["image/png", "application/json"]
+    },
+    {
+      "id": "chart_generation",
+      "name": "Chart & Statistical Model Generation",
+      "description": "Extract numerical data from document excerpts and generate charts (line, bar, pie, scatter, histogram) or fit statistical models (linear, polynomial, exponential) for what-if scenario analysis.",
+      "tags": ["chart", "plot", "statistics", "model-fitting", "data-visualization", "scenario-analysis"],
+      "inputModes": ["application/json", "text/plain"],
+      "outputModes": ["image/png", "application/json"]
+    },
+    {
+      "id": "document_ingestion",
+      "name": "Document Ingestion",
+      "description": "Index new documents from GCS into the hybrid search backend (Elasticsearch + Vertex AI Vector Search + PostgreSQL). Supports individual files and recursive folder scanning. Performs Gemini Vision OCR on image-heavy PDFs.",
+      "tags": ["ingestion", "indexing", "gcs", "ocr", "gemini-vision", "elasticsearch", "vertex-ai"],
+      "inputModes": ["application/json"],
+      "outputModes": ["application/json"]
+    },
+    {
+      "id": "system_status",
+      "name": "System Status",
+      "description": "Report the current state of all search backends: document count, index health, embedding availability, and storage statistics.",
+      "tags": ["status", "health", "monitoring", "diagnostics"],
+      "inputModes": ["text/plain"],
+      "outputModes": ["application/json"]
+    }
+  ],
+  "gcp": {
+    "project": "rbprj-100622",
+    "region": "us-central1",
+    "bucket": "fre-cognitive-search-docs",
+    "models": {
+      "synthesis": "gemini-2.5-flash",
+      "router": "gemini-2.5-flash",
+      "vision": "gemini-2.5-flash",
+      "embedding": "text-embedding-004"
+    }
+  }
+}
